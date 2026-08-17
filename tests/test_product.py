@@ -898,9 +898,16 @@ def test_long_location_and_notes_patch_reaches_calendar(monkeypatch):
         assert "charged phone" in captured["body"]
 
 
+def test_scan_year_range_is_accepted():
+    with TestClient(app) as client:
+        response = client.post("/api/scan", json={"days": 365, "max_emails": 1000})
+        assert response.status_code == 200
+        assert "Input should be less than or equal" not in response.text
+
+
 def test_scan_over_limits_returns_clear_code_not_pydantic_dump():
     with TestClient(app) as client:
-        response = client.post("/api/scan", json={"days": 91, "max_emails": 201})
+        response = client.post("/api/scan", json={"days": 366, "max_emails": 1001})
         assert response.status_code == 422
         detail = response.json()["detail"]
         assert detail == "scan_limits"
@@ -911,6 +918,18 @@ def test_ui_translates_scan_limit_errors():
     from pathlib import Path
 
     js = (Path(__file__).resolve().parents[1] / "save_dates" / "static" / "app.js").read_text(encoding="utf-8")
+    html = (Path(__file__).resolve().parents[1] / "save_dates" / "static" / "index.html").read_text(encoding="utf-8")
     assert "scan_limits" in js
-    assert "扫描范围最多 90 天" in js
-    assert "Scan lookback is at most 90 days and 200 messages." in js
+    assert "扫描范围最多 365 天" in js
+    assert "Scan lookback is at most 365 days and 1000 messages." in js
+    assert 'id="days"' in html and 'max="365"' in html and 'value="180"' in html
+    assert 'id="maxEmails"' in html and 'max="1000"' in html and 'value="500"' in html
+
+
+def test_scan_clamps_cap_lookback_and_count():
+    from save_dates.config import MAX_SCAN_DAYS, MAX_SCAN_EMAILS, clamp_scan_days, clamp_scan_emails
+
+    assert clamp_scan_days(400) == MAX_SCAN_DAYS
+    assert clamp_scan_emails(5000) == MAX_SCAN_EMAILS
+    assert clamp_scan_days(180) == 180
+    assert clamp_scan_emails(500) == 500

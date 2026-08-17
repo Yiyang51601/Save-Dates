@@ -23,6 +23,9 @@ from save_dates.config import (
     HOST,
     LOCATION_FIELD_MAX,
     LOCATION_WRITE_MAX,
+    MAX_SCAN_DAYS,
+    MAX_SCAN_EMAILS,
+    MIN_SCAN_EMAILS,
     NOTES_FIELD_MAX,
     PENDING_LIST_LIMIT,
     PORT,
@@ -97,8 +100,8 @@ async def no_cache_ui(request: Request, call_next):
 
 
 class ScanRequest(BaseModel):
-    days: int = Field(default=DEFAULT_SCAN_DAYS, ge=1, le=90)
-    max_emails: int = Field(default=DEFAULT_MAX_EMAILS, ge=10, le=200)
+    days: int = Field(default=DEFAULT_SCAN_DAYS, ge=1, le=MAX_SCAN_DAYS)
+    max_emails: int = Field(default=DEFAULT_MAX_EMAILS, ge=MIN_SCAN_EMAILS, le=MAX_SCAN_EMAILS)
     include_processed: bool = False
     demo: bool = False
     exit_demo: bool = False

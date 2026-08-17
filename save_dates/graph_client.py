@@ -16,6 +16,8 @@ from save_dates.config import (
     LOCATION_WRITE_MAX,
     REMINDER_MINUTES_ALL_DAY,
     REMINDER_MINUTES_TIMED,
+    clamp_scan_days,
+    clamp_scan_emails,
 )
 from save_dates.display_title import attach_display_titles
 from save_dates.extract import (
@@ -106,8 +108,8 @@ def scan_inbox(
     mark_seen: Callable[[str], None] | None = None,
     account: str = "",
 ) -> dict[str, Any]:
-    days = max(1, min(int(days), 90))
-    max_emails = max(10, min(int(max_emails), 200))
+    days = clamp_scan_days(days)
+    max_emails = clamp_scan_emails(max_emails)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     scanned = 0
     skipped_invite = 0
@@ -228,8 +230,8 @@ def search_recent_mail(
     account: str = "",
 ) -> dict[str, Any]:
     query = (query or "").strip()
-    days = max(1, min(int(days), 90))
-    max_emails = max(10, min(int(max_emails), 200))
+    days = clamp_scan_days(days)
+    max_emails = clamp_scan_emails(max_emails)
     if not query:
         return {"items": [], "scanned": 0}
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
