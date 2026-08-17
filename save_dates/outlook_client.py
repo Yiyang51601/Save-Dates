@@ -11,7 +11,14 @@ from save_dates.config import (
     REMINDER_MINUTES_ALL_DAY,
     REMINDER_MINUTES_TIMED,
 )
-from save_dates.extract import extract_all, html_to_text, local_tz
+from save_dates.extract import (
+    extract_all,
+    html_to_text,
+    local_tz,
+    match_threshold,
+    score_search_fields,
+    snippet_around_query,
+)
 
 OL_MAIL = 43
 OL_MEETING_REQUEST = 53
@@ -268,6 +275,133 @@ def scan_inbox_with_namespace(
         "account": str(ns.CurrentUser.Name),
         "mailboxes": mailboxes,
     }
+
+
+def _search_hits_from_mail(
+    query: str,
+    item: Any,
+    mailbox: str,
+    now: datetime,
+) -> list[dict[str, Any]]:
+    subject = _safe_str(item, "Subject") or "(无主题)"
+    sender = _safe_str(item, "SenderName") or _safe_str(item, "SenderEmailAddress") or "未知发件人"
+    body = _clipped_body(item)
+    score, highlight = score_search_fields(query, subject, sender, body)
+    if score < match_threshold(query):
+        return []
+    _, candidates = mail_to_candidates(item, now=now)
+    hits: list[dict[str, Any]] = []
+    if candidates:
+        for row in candidates:
+            if mailbox:
+                row["mailbox"] = row.get("mailbox") or mailbox
+            field_score, field_hit = score_search_fields(
+                query,
+                row.get("subject") or "",
+                row.get("snippet") or "",
+                row.get("title") or "",
+                row.get("sender") or "",
+                row.get("matched_text") or "",
+                body,
+            )
+            row["score"] = round(max(score, field_score), 3)
+            row["highlight"] = field_hit or highlight
+            row["source"] = "mail"
+            row["extracted"] = True
+            row["status"] = ""
+            row["can_open_mail"] = True
+            hits.append(row)
+        return hits
+    try:
+        received = _from_outlook_dt(item.ReceivedTime)
+        received_at = received.isoformat(timespec="seconds")
+    except Exception:
+        received_at = now.isoformat(timespec="seconds")
+    snippet = snippet_around_query(body or subject, query, highlight)
+    hits.append(
+        {
+            "email_id": _safe_str(item, "EntryID"),
+            "internet_id": "",
+            "store_id": "",
+            "mail_url": "",
+            "mailbox": mailbox,
+            "subject": subject,
+            "sender": sender,
+            "received_at": received_at,
+            "title": subject[:80],
+            "start_at": received_at,
+            "end_at": received_at,
+            "all_day": False,
+            "snippet": snippet,
+            "matched_text": highlight,
+            "confidence": round(min(0.7, 0.4 + score * 0.3), 2),
+            "fuzzy": True,
+            "kind": "event",
+            "task_type": "",
+            "score": round(score, 3),
+            "highlight": highlight,
+            "source": "mail",
+            "extracted": False,
+            "status": "",
+            "can_open_mail": True,
+        }
+    )
+    try:
+        store = item.Parent.Store
+        hits[-1]["store_id"] = str(store.StoreID or "")
+        hits[-1]["mailbox"] = hits[-1]["mailbox"] or str(store.DisplayName or "")
+    except Exception:
+        pass
+    return hits
+
+
+def search_recent_mail_with_namespace(
+    ns: Any,
+    query: str,
+    days: int = DEFAULT_SCAN_DAYS,
+    max_emails: int = DEFAULT_MAX_EMAILS,
+) -> dict[str, Any]:
+    query = (query or "").strip()
+    days = max(1, min(int(days), 90))
+    max_emails = max(10, min(int(max_emails), 200))
+    now = datetime.now(local_tz())
+    cutoff = now - timedelta(days=days)
+    scanned = 0
+    hits: list[dict[str, Any]] = []
+    if not query:
+        return {"items": [], "scanned": 0}
+
+    for inbox, mailbox, _store_id in _iter_inboxes(ns):
+        if scanned >= max_emails:
+            break
+        try:
+            items = inbox.Items
+            items.Sort("[ReceivedTime]", True)
+        except Exception:
+            continue
+        for item in items:
+            try:
+                if scanned >= max_emails:
+                    break
+                try:
+                    received = _from_outlook_dt(item.ReceivedTime)
+                except Exception:
+                    continue
+                if received < cutoff:
+                    break
+                if _is_meeting_invite(item):
+                    continue
+                try:
+                    class_id = int(item.Class)
+                except Exception:
+                    continue
+                if class_id != OL_MAIL:
+                    continue
+                scanned += 1
+                hits.extend(_search_hits_from_mail(query, item, mailbox, now))
+            finally:
+                item = None
+    return {"items": hits, "scanned": scanned}
 
 
 def create_calendar_event_with_app(

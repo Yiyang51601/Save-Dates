@@ -25,6 +25,7 @@ from save_dates.outlook_client import (
     mail_to_candidates,
     move_mail_with_namespace,
     scan_inbox_with_namespace,
+    search_recent_mail_with_namespace,
 )
 
 
@@ -157,6 +158,19 @@ class OutlookRuntime:
             return result
 
         return self.submit(_job)
+
+    def search_mail(self, query: str, days: int, max_emails: int) -> dict[str, Any]:
+        def _job() -> dict[str, Any]:
+            if self._ns is None:
+                return {"items": [], "scanned": 0}
+            return search_recent_mail_with_namespace(
+                self._ns,
+                query,
+                days=days,
+                max_emails=max_emails,
+            )
+
+        return self.submit(_job, timeout=90)
 
     def create_event(self, **kwargs: Any) -> str:
         def _job() -> str:
@@ -441,6 +455,14 @@ class MailboxHub:
         if snap.backend == "graph":
             return self.graph.scan(days, max_emails, include_processed)
         return self.classic.scan(days, max_emails, include_processed)
+
+    def search_mail(self, query: str, days: int, max_emails: int) -> dict[str, Any]:
+        snap = self.snapshot()
+        if not snap.connected:
+            return {"items": [], "scanned": 0}
+        if snap.backend == "graph":
+            return self.graph.search_mail(query, days, max_emails)
+        return self.classic.search_mail(query, days, max_emails)
 
     def create_event(self, **kwargs: Any) -> str:
         snap = self.snapshot()

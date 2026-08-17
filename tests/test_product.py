@@ -12,10 +12,14 @@ def test_home_and_static():
         assert "Save Dates" in home.text
         assert "进阶 · 仅新 Outlook" in home.text
         assert "经典 Outlook" in home.text
+        assert "mailSearch" in home.text
+        assert "searchPlaceholder" in home.text
         css = client.get("/static/styles.css")
         assert css.status_code == 200
         js = client.get("/static/app.js")
         assert js.status_code == 200
+        assert "搜邮件里的活动" in js.text
+        assert "Search mail for events" in js.text
 
 
 def test_status_and_demo_review_flow():
@@ -78,7 +82,7 @@ def test_backend_setting_roundtrip():
         assert saved.json()["backend"] == "graph"
         settings = client.get("/api/settings").json()
         assert settings["backend"] == "graph"
-        assert settings["has_bundled_graph_client"] is False
+        assert settings["has_bundled_graph_client"] is True
         client.put("/api/settings", json={"backend": "auto"})
 
 
@@ -89,12 +93,23 @@ def test_desktop_show_without_window_is_404():
         assert response.json()["detail"] == "no_desktop_window"
 
 
-def test_microsoft_login_requires_client_id():
+def test_microsoft_login_uses_bundled_public_client():
+    from save_dates.config import DEFAULT_GRAPH_CLIENT_ID, GRAPH_REDIRECT_URI, GRAPH_SCOPES
+    from save_dates.graph_auth import get_client_id
+
+    assert DEFAULT_GRAPH_CLIENT_ID == "65f4dd53-e782-46a4-a0b1-8ccd331dd6ff"
+    assert GRAPH_REDIRECT_URI == "http://localhost"
+    assert GRAPH_SCOPES == ("User.Read", "Mail.Read", "Mail.ReadWrite", "Calendars.ReadWrite")
     with TestClient(app) as client:
         client.put("/api/settings", json={"graph_client_id": "", "backend": "graph"})
-        response = client.post("/api/microsoft/login")
-        assert response.status_code == 400
-        assert response.json()["detail"] == "graph_client_id_missing"
+        settings = client.get("/api/settings").json()
+        assert settings["has_bundled_graph_client"] is True
+        assert get_client_id() == DEFAULT_GRAPH_CLIENT_ID
+        home = client.get("/")
+        assert "msLoginBtn" in home.text
+        assert "graphOverride" in home.text
+        js = client.get("/static/app.js").text
+        assert "不用填写应用 ID" in js
         client.put("/api/settings", json={"backend": "auto"})
 
 
@@ -148,3 +163,48 @@ def test_demo_promo_can_be_cleared_locally():
         cleared = client.post(f"/api/candidates/{promo['id']}/accept")
         assert cleared.status_code == 200
         assert cleared.json()["item"]["status"] == "accepted"
+
+
+def test_search_any_keyword_is_bilingual_and_does_not_write_calendar():
+    with TestClient(app) as client:
+        client.put("/api/settings", json={"lang": "zh"})
+        client.post("/api/scan", json={"demo": True})
+        before = client.get("/api/status").json()["counts"]
+        for query in ("讲座", "lecture", "orientation", "迎新", "组会", "学生会"):
+            payload = client.get("/api/search", params={"q": query}).json()
+            assert payload["q"] == query
+            assert payload["items"], query
+            assert payload["items"][0]["received_at"] >= payload["items"][-1]["received_at"]
+        typo = client.get("/api/search", params={"q": "orientattion"})
+        assert typo.status_code == 200
+        assert typo.json()["items"]
+        after = client.get("/api/status").json()["counts"]
+        assert after.get("accepted", 0) == before.get("accepted", 0)
+        empty = client.get("/api/search", params={"q": ""})
+        assert empty.status_code == 200
+        assert empty.json()["items"] == []
+
+
+def test_search_ranks_latest_received_first():
+    from save_dates.search import _merge
+
+    older = {
+        "email_id": "old",
+        "title": "workshop",
+        "start_at": "2026-01-01T15:00",
+        "kind": "event",
+        "received_at": "2026-01-01T10:00:00",
+        "score": 1.0,
+        "id": 1,
+    }
+    newer = {
+        "email_id": "new",
+        "title": "workshop",
+        "start_at": "2026-08-16T15:00",
+        "kind": "event",
+        "received_at": "2026-08-16T18:00:00",
+        "score": 0.8,
+        "id": 2,
+    }
+    merged = _merge([older], [newer], limit=12)
+    assert merged[0]["email_id"] == "new"

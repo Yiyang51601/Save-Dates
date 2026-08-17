@@ -6,12 +6,14 @@ import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, time
 from calendar import monthrange
+from difflib import SequenceMatcher
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
 from tzlocal import get_localzone
 
 from save_dates.config import BODY_CHAR_LIMIT, MAX_FUTURE_DAYS, PAST_GRACE_HOURS
+from save_dates.mail_search import expand_query
 
 CN_WEEKDAY = {
     "一": 0,
@@ -776,3 +778,130 @@ def extract_all(
     return extract_promo(
         subject, body, received_at, tz=tz, list_unsubscribe=list_unsubscribe, sender=sender
     )
+
+
+_LATIN_TOKEN = re.compile(r"[a-z0-9']+", re.I)
+_CJK_BLOCK = re.compile(r"[\u4e00-\u9fff]+")
+
+
+def fold_search(text: str) -> str:
+    return unicodedata.normalize("NFKC", text or "").casefold()
+
+
+def fuzzy_ratio(left: str, right: str) -> float:
+    if not left or not right:
+        return 0.0
+    if left == right:
+        return 1.0
+    return SequenceMatcher(None, left, right).ratio()
+
+
+def match_threshold(query: str) -> float:
+    n = len(fold_search(query))
+    if n <= 2:
+        return 0.9
+    if n <= 4:
+        return 0.8
+    return 0.72
+
+
+def _token_windows(token: str, query: str) -> list[str]:
+    """Compare whole Latin tokens so 'exam' does not match 'example'."""
+    if not token:
+        return []
+    return [token]
+
+
+def _candidate_fragments(folded_text: str, folded_query: str) -> list[str]:
+    fragments: list[str] = []
+    qn = len(folded_query)
+    for token in _LATIN_TOKEN.findall(folded_text):
+        if abs(len(token) - qn) <= max(3, qn // 2) or qn <= len(token):
+            fragments.extend(_token_windows(token, folded_query))
+    q_cjk = len(re.findall(r"[\u4e00-\u9fff]", folded_query))
+    if q_cjk:
+        width = q_cjk
+        for block in _CJK_BLOCK.findall(folded_text):
+            if folded_query in block:
+                fragments.append(folded_query)
+                continue
+            w = min(max(width, 1), len(block))
+            step = 1 if len(block) <= 80 else max(1, w)
+            for i in range(0, len(block) - w + 1, step):
+                fragments.append(block[i : i + w])
+    if len(folded_text) <= max(48, qn * 4):
+        fragments.append(folded_text)
+    return fragments
+
+
+def best_fuzzy_hit(query: str, text: str) -> tuple[float, str]:
+    """Return (score 0-1, matched fragment) for a typo-tolerant search."""
+    q = fold_search(query)
+    t = fold_search(text)
+    if not q or not t:
+        return 0.0, ""
+    if any("\u4e00" <= ch <= "\u9fff" for ch in q):
+        if q in t:
+            return 1.0, q
+    elif re.search(rf"(?<![a-z0-9]){re.escape(q)}(?![a-z0-9])", t):
+        return 1.0, q
+    best = 0.0
+    frag = ""
+    for candidate in _candidate_fragments(t, q):
+        score = fuzzy_ratio(q, candidate)
+        if score > best:
+            best = score
+            frag = candidate
+            if best >= 0.99:
+                break
+    if not frag:
+        return 0.0, ""
+    return best, frag
+
+
+def fuzzy_score(query: str, text: str) -> float:
+    return best_fuzzy_hit(query, text)[0]
+
+
+def _score_fields_one(term: str, *fields: str) -> tuple[float, str]:
+    best = 0.0
+    frag = ""
+    for field in fields:
+        score, hit = best_fuzzy_hit(term, field or "")
+        if score > best:
+            best = score
+            frag = hit
+    return best, frag
+
+
+def score_search_fields(query: str, *fields: str) -> tuple[float, str]:
+    """Score the typed query and any EN↔ZH synonyms against subject/body fields."""
+    best = 0.0
+    frag = ""
+    for term in expand_query(query):
+        score, hit = _score_fields_one(term, *fields)
+        if score < match_threshold(term):
+            continue
+        if score > best:
+            best = score
+            frag = hit
+    return best, frag
+
+
+def snippet_around_query(text: str, query: str, fragment: str = "", radius: int = 90) -> str:
+    hay = text or ""
+    if not hay:
+        return ""
+    needle = fragment or query or ""
+    if needle:
+        match = re.search(re.escape(needle), hay, re.I)
+        if match:
+            return _clip_snippet(hay, match.start(), match.end(), radius=radius)
+        folded = fold_search(hay)
+        folded_needle = fold_search(needle)
+        idx = folded.find(folded_needle) if folded_needle else -1
+        if idx >= 0:
+            end = min(len(hay), idx + max(len(needle), 1))
+            return _clip_snippet(hay, idx, end, radius=radius)
+    clipped = hay[: radius * 2].replace("\n", " ").strip()
+    return clipped + ("…" if len(hay) > radius * 2 else "")

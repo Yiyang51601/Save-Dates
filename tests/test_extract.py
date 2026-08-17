@@ -203,3 +203,16 @@ def test_advisor_sender_is_not_promo():
         sender="导师",
     )
     assert all(item.kind != "promo" for item in items)
+
+
+def test_fuzzy_orientation_accepts_typo():
+    from save_dates.extract import best_fuzzy_hit, fuzzy_score, match_threshold
+
+    exact = fuzzy_score("orientation", "Welcome to student orientation week.")
+    typo, fragment = best_fuzzy_hit("orientation", "New student orientattion starts Monday.")
+    unrelated = fuzzy_score("orientation", "grocery list apples bananas milk")
+    assert exact == 1.0
+    assert typo >= 0.85
+    assert "orient" in fragment
+    assert unrelated < match_threshold("orientation")
+    assert fuzzy_score("讲座", "本周五下午3点举办讲座，欢迎参加。") == 1.0

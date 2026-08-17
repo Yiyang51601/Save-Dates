@@ -56,6 +56,8 @@ def acquire_token(interactive: bool = False) -> str:
     if accounts:
         result = app.acquire_token_silent(list(GRAPH_SCOPES), account=accounts[0])
     if (not result or "access_token" not in result) and interactive:
+        # Public native client: MSAL opens the system browser on http://localhost
+        # (free port). Entra must allow that redirect. Do not add a client secret.
         result = app.acquire_token_interactive(
             list(GRAPH_SCOPES),
             prompt="select_account",

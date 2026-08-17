@@ -37,6 +37,10 @@ BODY_CHAR_LIMIT = 8000
 PAST_GRACE_HOURS = 12
 MAX_FUTURE_DAYS = 400
 PENDING_LIST_LIMIT = 80
+SEARCH_SCAN_DAYS = 14
+SEARCH_MAX_EMAILS = 40
+SEARCH_RESULT_LIMIT = 12
+SEARCH_QUERY_MAX = 80
 
 WATCH_IDLE_SEC = 0.08
 WATCH_RETRY_SEC = 10
@@ -47,10 +51,10 @@ GRAPH_STATE_PATH = DATA_DIR / "graph_state.json"
 GRAPH_ID_PREFIX = "graph:"
 GRAPH_SCOPES = ("User.Read", "Mail.Read", "Mail.ReadWrite", "Calendars.ReadWrite")
 GRAPH_AUTHORITY = "https://login.microsoftonline.com/common"
-# Developer-owned public client. Friends never register Entra apps.
-# Paste the Application (client) ID here after you register once; leave empty
-# until then. New Outlook sign-in stays advanced if this is blank.
-DEFAULT_GRAPH_CLIENT_ID = ""
+# Public native client. MSAL interactive login binds http://localhost on a free port.
+GRAPH_REDIRECT_URI = "http://localhost"
+# Developer-owned public client. Friends never register Entra apps or type an App ID.
+DEFAULT_GRAPH_CLIENT_ID = "65f4dd53-e782-46a4-a0b1-8ccd331dd6ff"
 
 CATEGORY_NAME = "Save Dates"
 REMINDER_MINUTES_TIMED = 30

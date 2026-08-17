@@ -16,7 +16,14 @@ from save_dates.config import (
     REMINDER_MINUTES_ALL_DAY,
     REMINDER_MINUTES_TIMED,
 )
-from save_dates.extract import extract_all, html_to_text, local_tz
+from save_dates.extract import (
+    extract_all,
+    html_to_text,
+    local_tz,
+    match_threshold,
+    score_search_fields,
+    snippet_around_query,
+)
 
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 MEETING_TYPES = {
@@ -134,6 +141,102 @@ def scan_inbox(
         "account": account,
         "mailboxes": [account] if account else [],
     }
+
+
+def _search_hits_from_message(
+    query: str,
+    msg: dict[str, Any],
+    now: datetime,
+    mailbox: str,
+) -> list[dict[str, Any]]:
+    subject = str(msg.get("subject") or "(无主题)")
+    sender = _sender_name(msg)
+    body = _clipped_body(msg)
+    score, highlight = score_search_fields(query, subject, sender, body)
+    if score < match_threshold(query):
+        return []
+    _, candidates = message_to_candidates(msg, now=now, mailbox=mailbox)
+    if candidates:
+        hits: list[dict[str, Any]] = []
+        for row in candidates:
+            field_score, field_hit = score_search_fields(
+                query,
+                row.get("subject") or "",
+                row.get("snippet") or "",
+                row.get("title") or "",
+                row.get("sender") or "",
+                row.get("matched_text") or "",
+                body,
+            )
+            row["score"] = round(max(score, field_score), 3)
+            row["highlight"] = field_hit or highlight
+            row["source"] = "mail"
+            row["extracted"] = True
+            row["status"] = ""
+            row["can_open_mail"] = True
+            hits.append(row)
+        return hits
+    received = _parse_graph_dt(msg.get("receivedDateTime"))
+    received_at = (received or now).isoformat(timespec="seconds")
+    email_id = f"{GRAPH_ID_PREFIX}{msg.get('id') or ''}"
+    return [
+        {
+            "email_id": email_id,
+            "internet_id": str(msg.get("internetMessageId") or ""),
+            "store_id": "",
+            "mail_url": str(msg.get("webLink") or ""),
+            "mailbox": mailbox,
+            "subject": subject,
+            "sender": sender,
+            "received_at": received_at,
+            "title": subject[:80],
+            "start_at": received_at,
+            "end_at": received_at,
+            "all_day": False,
+            "snippet": snippet_around_query(body or subject, query, highlight),
+            "matched_text": highlight,
+            "confidence": round(min(0.7, 0.4 + score * 0.3), 2),
+            "fuzzy": True,
+            "kind": "event",
+            "task_type": "",
+            "score": round(score, 3),
+            "highlight": highlight,
+            "source": "mail",
+            "extracted": False,
+            "status": "",
+            "can_open_mail": bool(msg.get("id") or msg.get("webLink")),
+        }
+    ]
+
+
+def search_recent_mail(
+    token: str,
+    query: str,
+    days: int = DEFAULT_SCAN_DAYS,
+    max_emails: int = DEFAULT_MAX_EMAILS,
+    account: str = "",
+) -> dict[str, Any]:
+    query = (query or "").strip()
+    days = max(1, min(int(days), 90))
+    max_emails = max(10, min(int(max_emails), 200))
+    if not query:
+        return {"items": [], "scanned": 0}
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    scanned = 0
+    hits: list[dict[str, Any]] = []
+    now = datetime.now(local_tz())
+    url = _messages_url(cutoff, max_emails, inbox_only=False)
+    while url and scanned < max_emails:
+        payload = graph_request("GET", url, token)
+        for msg in payload.get("value") or []:
+            if scanned >= max_emails:
+                break
+            if _is_meeting_invite(msg) or msg.get("isDraft"):
+                continue
+            scanned += 1
+            hits.extend(_search_hits_from_message(query, msg, now, account))
+        url = payload.get("@odata.nextLink")
+    return {"items": hits, "scanned": scanned}
 
 
 def list_new_messages(token: str, since: datetime, top: int = 25) -> list[dict[str, Any]]:
@@ -287,7 +390,7 @@ def graph_request(method: str, url: str, token: str, **kwargs: Any) -> dict[str,
         return response.json()
 
 
-def _messages_url(since: datetime, top: int) -> str:
+def _messages_url(since: datetime, top: int, *, inbox_only: bool = True) -> str:
     iso = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     select = (
         "id,subject,from,receivedDateTime,body,internetMessageId,"
@@ -299,7 +402,12 @@ def _messages_url(since: datetime, top: int) -> str:
         f"&$filter={quote(f'receivedDateTime ge {iso}')}"
         f"&$select={select}"
     )
-    return f"{GRAPH_ROOT}/me/mailFolders/inbox/messages?{query}"
+    root = (
+        f"{GRAPH_ROOT}/me/mailFolders/inbox/messages"
+        if inbox_only
+        else f"{GRAPH_ROOT}/me/messages"
+    )
+    return f"{root}?{query}"
 
 
 def _is_meeting_invite(msg: dict[str, Any]) -> bool:

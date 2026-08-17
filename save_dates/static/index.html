@@ -59,7 +59,8 @@
           <button class="ghost small" id="msLoginBtn" type="button" data-i18n="loginMs"></button>
           <button class="ghost small hidden" id="msLogoutBtn" type="button" data-i18n="logoutMs"></button>
         </div>
-        <div class="graph-setup hidden" id="graphSetup">
+        <details class="graph-setup" id="graphSetup">
+          <summary data-i18n="graphOverride"></summary>
           <p data-i18n="graphHelp"></p>
           <label>
             <span data-i18n="graphClientId"></span>
@@ -69,15 +70,22 @@
             <button class="primary small" id="saveClientId" type="button" data-i18n="saveClientId"></button>
             <a class="help-link" href="https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener" data-i18n="openEntra"></a>
           </div>
-        </div>
+        </details>
       </details>
     </div>
 
     <section class="toolbar">
       <button class="primary" id="scanBtn" type="button" data-i18n="scanBtn"></button>
       <button class="ghost" id="demoBtn" type="button" data-i18n="demoBtn"></button>
+      <label class="search-wrap">
+        <input id="mailSearch" type="search" autocomplete="off" spellcheck="false" data-i18n-placeholder="searchPlaceholder" />
+      </label>
       <div class="counts" id="counts"></div>
     </section>
+    <div class="search-panel hidden" id="searchPanel">
+      <p class="search-hint" id="searchHint"></p>
+      <div id="searchResults"></div>
+    </div>
 
     <div class="lane-row">
       <div class="seg" id="laneSeg">

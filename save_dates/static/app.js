@@ -10,22 +10,23 @@ const STRINGS = {
     backendAuto: "自动（优先经典 Outlook）",
     backendClassic: "经典 Outlook",
     backendGraph: "新 Outlook（进阶）",
-    classicHint: "给朋友：打开经典 Outlook（outlook.exe）并保持运行即可，不用填应用 ID。",
+    classicHint: "给朋友：打开经典 Outlook（outlook.exe）并保持运行即可。新 Outlook 用户在进阶里点「登录 Microsoft」，不用填应用 ID。",
     advancedNewOutlook: "进阶 · 仅新 Outlook",
-    advancedHelp: "只有不用经典 Outlook、只开新 Outlook 时，才点下面登录 Microsoft。一般人请忽略。",
+    advancedHelp: "只有不用经典 Outlook、只开新 Outlook 时，才点下面登录 Microsoft。不用填写应用 ID。",
     loginMs: "登录 Microsoft",
     logoutMs: "退出账号",
     loggingIn: "正在打开 Microsoft 登录页…",
     msConnected: "已用 Microsoft 账号连接。日程会写到同一邮箱的日历。",
-    graphClientId: "应用程序 ID（开发者）",
+    graphClientId: "应用程序 ID（本地覆盖）",
+    graphOverride: "开发者：本地覆盖应用 ID",
     saveClientId: "保存",
     openEntra: "开发者：打开 Entra",
-    graphHelp: "朋友不用填。开发者登记一次公共客户端后写入软件，之后大家只点「登录 Microsoft」。",
+    graphHelp: "软件已内置公共客户端 ID，朋友直接点「登录 Microsoft」即可。仅本地调试才需要覆盖。",
     liveTitleGraph: "实时同步 · {account}",
     liveMetaGraph: "新 Outlook / Microsoft 365 · 时区 {timezone}",
     new_outlook_detected: "现在开着的是新 Outlook。请再打开经典 Outlook（开始菜单搜 Outlook）并保持运行。一般不用登录 Microsoft。",
     graph_login_needed: "请登录 Microsoft 账号以连接新 Outlook。",
-    graph_client_id_missing: "还没有内置的 Microsoft 应用 ID。请改用经典 Outlook，或让开发者把 ID 写进软件后再登录。",
+    graph_client_id_missing: "还没有可用的 Microsoft 应用 ID。请改用经典 Outlook，或在下方填写本地覆盖 ID。",
     graph_auth_failed: "Microsoft 登录失败。",
     graph_auth_cancelled: "已取消 Microsoft 登录。",
     graph_request_failed: "Microsoft 邮箱请求失败。",
@@ -36,6 +37,16 @@ const STRINGS = {
     includeProcessed: "包含已处理邮件",
     scanBtn: "补扫",
     demoBtn: "示例",
+    searchPlaceholder: "搜邮件里的活动",
+    searchHint: "输入任意关键词，中英文都能搜。点加入才会进日历。",
+    searchSearching: "正在搜索最近邮件…",
+    searchEmpty: "最近邮件里没有找到相关内容。",
+    searchLive: "已在最近收件箱中查找 {n} 封。",
+    searchSaved: "待确认",
+    searchAccepted: "已加入",
+    searchInbox: "收件箱",
+    searchMailOnly: "未识别出活动",
+    searchOpen: "原邮件",
     empty: "在等新邮件。讲座通知、导师往来里的日期会出现在这里。",
     emptyTasks: "暂无待办。没写时间的作业、待约见面、等回复会出现在这里。",
     emptyPromo: "暂无广告。带退订、优惠券的推销邮件会出现在这里，点清掉才进垃圾箱。",
@@ -113,22 +124,23 @@ const STRINGS = {
     backendAuto: "Auto (Classic Outlook first)",
     backendClassic: "Classic Outlook",
     backendGraph: "New Outlook (advanced)",
-    classicHint: "For friends: open Classic Outlook (outlook.exe) and leave it running. No Application ID needed.",
+    classicHint: "For friends: open Classic Outlook (outlook.exe) and leave it running. New Outlook users click Sign in under Advanced — no Application ID to type.",
     advancedNewOutlook: "Advanced · New Outlook only",
-    advancedHelp: "Use this only if you do not have Classic Outlook. Most people can ignore it.",
+    advancedHelp: "Use this only if you do not have Classic Outlook. Click Sign in to Microsoft. You do not type an Application ID.",
     loginMs: "Sign in to Microsoft",
     logoutMs: "Sign out",
     loggingIn: "Opening the Microsoft sign-in page…",
     msConnected: "Signed in with Microsoft. Events go to the same mailbox calendar.",
-    graphClientId: "Application ID (developer)",
+    graphClientId: "Application ID (local override)",
+    graphOverride: "Developer: local App ID override",
     saveClientId: "Save",
     openEntra: "Developer: open Entra",
-    graphHelp: "Friends should skip this. The developer registers one public client and ships it in the app. After that, people only click Sign in.",
+    graphHelp: "The app already ships a public client ID. Friends just click Sign in. Override this only for local debugging.",
     liveTitleGraph: "Live sync · {account}",
     liveMetaGraph: "New Outlook / Microsoft 365 · {timezone}",
     new_outlook_detected: "New Outlook is running. Open Classic Outlook from the Start menu and leave it running. You usually do not need to sign in with Microsoft.",
     graph_login_needed: "Sign in with Microsoft to connect New Outlook.",
-    graph_client_id_missing: "No bundled Microsoft app ID yet. Use Classic Outlook, or ask the developer to ship an Application ID first.",
+    graph_client_id_missing: "No Microsoft app ID is available. Use Classic Outlook, or enter a local override below.",
     graph_auth_failed: "Microsoft sign-in failed.",
     graph_auth_cancelled: "Microsoft sign-in was cancelled.",
     graph_request_failed: "The Microsoft mailbox request failed.",
@@ -139,6 +151,16 @@ const STRINGS = {
     includeProcessed: "Include processed mail",
     scanBtn: "Scan",
     demoBtn: "Sample",
+    searchPlaceholder: "Search mail for events",
+    searchHint: "Type any keyword — Chinese and English both work. Nothing is added to the calendar until you confirm.",
+    searchSearching: "Searching recent mail…",
+    searchEmpty: "No matching mail in recent messages.",
+    searchLive: "Looked through {n} recent inbox messages.",
+    searchSaved: "To review",
+    searchAccepted: "Added",
+    searchInbox: "Inbox",
+    searchMailOnly: "No event extracted",
+    searchOpen: "Mail",
     empty: "Waiting for mail. Lectures, advisor threads, and other dates show up here.",
     emptyTasks: "No open loops yet. Homework without a due date, unscheduled meetings, and waiting-for-a-reply items show up here.",
     emptyPromo: "No ads yet. Promos with unsubscribe or coupons show up here. Nothing is junked until you clear it.",
@@ -217,6 +239,11 @@ let lastStatus = null;
 let currentLane = "event";
 let currentMailbox = "";
 let lastUndoIds = [];
+let lastSearchQuery = "";
+let lastSearchItems = [];
+let lastSearchMeta = { scanned: 0, live: false };
+let searchTimer = 0;
+let searchSeq = 0;
 
 function t(key, vars = {}) {
   const table = STRINGS[lang] || STRINGS.zh;
@@ -232,12 +259,16 @@ function applyI18n() {
   document.querySelectorAll("[data-i18n]").forEach((el) => {
     el.textContent = t(el.getAttribute("data-i18n"));
   });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+    el.placeholder = t(el.getAttribute("data-i18n-placeholder"));
+  });
   document.querySelectorAll("#langSeg [data-lang]").forEach((btn) => {
     btn.classList.toggle("on", btn.dataset.lang === lang);
   });
   updateLaneButtons(lastItems);
   if (lastStatus) applyStatus(lastStatus);
   if (lastItems.length) render(lastItems);
+  if (lastSearchQuery) renderSearch(lastSearchItems, lastSearchQuery, lastSearchMeta);
 }
 
 function pad(n) {
@@ -307,6 +338,24 @@ function highlight(snippet, matched) {
   if (!matched) return safe;
   const m = matched.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
   return safe.replace(m, `<mark>${m}</mark>`);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function highlightQuery(snippet, query, fragment) {
+  const safe = escapeHtml(snippet || "");
+  const needle = fragment || query;
+  if (!needle) return safe;
+  try {
+    const re = new RegExp(escapeRegExp(needle), "ig");
+    const marked = safe.replace(re, (m) => `<mark>${m}</mark>`);
+    if (marked !== safe) return marked;
+  } catch {
+    return safe;
+  }
+  return safe;
 }
 
 function setBanner(text, isError = false, undoIds = []) {
@@ -392,11 +441,13 @@ function applyStatus(s) {
   const bundled = Boolean(s.settings?.has_bundled_graph_client);
   const savedId = Boolean(s.settings?.graph_client_id);
   const needId = !bundled && !savedId;
-  const showIdField = needId && (
+  const showOverride = needId && (
     s.error === "graph_client_id_missing" || s.settings?.backend === "graph"
   );
-  $("graphSetup").classList.toggle("hidden", !showIdField);
-  if (showIdField || s.settings?.backend === "graph") {
+  if (showOverride) {
+    $("advancedBox").open = true;
+    $("graphSetup").open = true;
+  } else if (s.settings?.backend === "graph") {
     $("advancedBox").open = true;
   }
 }
@@ -562,6 +613,159 @@ function render(items) {
   updateBatchBar();
 }
 
+function sourceLabel(item) {
+  if (item.status === "accepted") return t("searchAccepted");
+  if (item.id && item.status === "pending") return t("searchSaved");
+  if (item.extracted === false) return t("searchMailOnly");
+  return t("searchInbox");
+}
+
+function sourceClass(item) {
+  if (item.status === "accepted") return "accepted";
+  if (item.id && item.status === "pending") return "pending";
+  return "";
+}
+
+function renderSearch(items, query, meta = {}) {
+  lastSearchItems = items || [];
+  lastSearchQuery = query || "";
+  lastSearchMeta = meta || lastSearchMeta;
+  const panel = $("searchPanel");
+  const hint = $("searchHint");
+  const host = $("searchResults");
+  if (!panel || !host) return;
+  if (!query) {
+    panel.classList.add("hidden");
+    host.innerHTML = "";
+    return;
+  }
+  panel.classList.remove("hidden");
+  const liveNote = meta.live ? ` ${t("searchLive", { n: meta.scanned || 0 })}` : "";
+  hint.textContent = `${t("searchHint")}${liveNote}`;
+  if (!lastSearchItems.length) {
+    host.innerHTML = `<p class="search-hint">${escapeHtml(t("searchEmpty"))}</p>`;
+    return;
+  }
+  host.innerHTML = lastSearchItems.map((item, index) => {
+    const start = parseTs(item.start_at || item.received_at);
+    const when = Number.isNaN(start.getTime()) ? "" : (item.all_day ? toDateInput(start) : fmtReceived(item.start_at || item.received_at));
+    const snippet = highlightQuery(item.snippet || item.subject || "", query, item.highlight || "");
+    const openDisabled = item.can_open_mail ? "" : "disabled";
+    return `<div class="search-hit" data-search-index="${index}" role="button" tabindex="0">
+      <div class="hit-top">
+        <div class="hit-title">${escapeHtml(item.title || item.subject || "")}</div>
+        <div class="hit-when">${escapeHtml(when)}</div>
+      </div>
+      <div class="hit-meta"><span class="hit-tag ${sourceClass(item)}">${escapeHtml(sourceLabel(item))}</span>${escapeHtml(t("fromMail", {
+        sender: item.sender || "",
+        subject: item.subject || "",
+        received: fmtReceived(item.received_at),
+      }))}</div>
+      <div class="hit-snippet">${snippet}</div>
+      <button class="ghost small hit-mail" type="button" data-search-open="${index}" ${openDisabled}>${escapeHtml(t("searchOpen"))}</button>
+    </div>`;
+  }).join("");
+}
+
+function jumpToCard(item) {
+  if (!item || !item.id) return false;
+  currentLane = isPromo(item) ? "promo" : isTask(item) ? "task" : "event";
+  if (item.mailbox) currentMailbox = "";
+  render(lastItems);
+  const card = document.querySelector(`.card[data-id="${item.id}"]`);
+  if (!card) return false;
+  card.classList.add("flash");
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+  setTimeout(() => card.classList.remove("flash"), 1600);
+  return true;
+}
+
+async function focusSearchItem(item) {
+  if (!item) return;
+  if (item.id) {
+    if (item.status === "pending") {
+      const found = lastItems.some((row) => row.id === item.id);
+      if (!found) await loadList();
+      if (jumpToCard(item)) return;
+    }
+    return;
+  }
+  if (item.extracted === false) return;
+  const pinned = await api("/api/search/pin", {
+    method: "POST",
+    body: JSON.stringify({
+      email_id: item.email_id || "",
+      internet_id: item.internet_id || "",
+      store_id: item.store_id || "",
+      mail_url: item.mail_url || "",
+      subject: item.subject || "",
+      sender: item.sender || "",
+      received_at: item.received_at,
+      title: item.title || item.subject || "",
+      start_at: item.start_at,
+      end_at: item.end_at,
+      all_day: Boolean(item.all_day),
+      snippet: item.snippet || "",
+      matched_text: item.matched_text || "",
+      confidence: item.confidence || 0.5,
+      fuzzy: Boolean(item.fuzzy),
+      kind: item.kind || "event",
+      task_type: item.task_type || "",
+      mailbox: item.mailbox || "",
+    }),
+  });
+  await loadList();
+  await refreshStatus();
+  jumpToCard(pinned.item);
+}
+
+async function openSearchMail(item) {
+  if (!item) return;
+  if (item.id && item.can_open_mail) {
+    await api(`/api/candidates/${item.id}/open-mail`, { method: "POST" });
+    setBanner(t("openedMail"));
+    return;
+  }
+  await api("/api/search/open-mail", {
+    method: "POST",
+    body: JSON.stringify({
+      email_id: item.email_id || "",
+      store_id: item.store_id || "",
+      mail_url: item.mail_url || "",
+    }),
+  });
+  setBanner(t("openedMail"));
+}
+
+async function runMailSearch(query) {
+  const q = String(query || "").trim();
+  lastSearchQuery = q;
+  const panel = $("searchPanel");
+  const hint = $("searchHint");
+  const host = $("searchResults");
+  if (!q) {
+    lastSearchItems = [];
+    if (panel) panel.classList.add("hidden");
+    if (host) host.innerHTML = "";
+    return;
+  }
+  if (panel) panel.classList.remove("hidden");
+  if (hint) hint.textContent = t("searchSearching");
+  const seq = ++searchSeq;
+  try {
+    const data = await api(`/api/search?q=${encodeURIComponent(q)}`);
+    if (seq !== searchSeq) return;
+    renderSearch(data.items || [], q, { scanned: data.scanned || 0, live: Boolean(data.live) });
+    if (data.added) {
+      await loadList();
+      await refreshStatus();
+    }
+  } catch (err) {
+    if (seq !== searchSeq) return;
+    setBanner(err.message, true);
+  }
+}
+
 async function loadList() {
   const data = await api("/api/candidates?status=pending");
   render(data.items || []);
@@ -625,6 +829,67 @@ $("demoBtn").addEventListener("click", async () => {
   await api("/api/scan", { method: "POST", body: JSON.stringify({ demo: true }) });
   setBanner(t("demoLoaded"));
   await loadList();
+});
+
+$("mailSearch").addEventListener("input", () => {
+  const query = $("mailSearch").value.trim();
+  window.clearTimeout(searchTimer);
+  if (!query) {
+    searchSeq += 1;
+    lastSearchQuery = "";
+    lastSearchItems = [];
+    $("searchPanel").classList.add("hidden");
+    $("searchResults").innerHTML = "";
+    return;
+  }
+  searchTimer = window.setTimeout(() => {
+    runMailSearch(query);
+  }, 280);
+});
+
+$("mailSearch").addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    $("mailSearch").value = "";
+    $("mailSearch").dispatchEvent(new Event("input"));
+    return;
+  }
+  if (event.key === "Enter") {
+    event.preventDefault();
+    window.clearTimeout(searchTimer);
+    runMailSearch($("mailSearch").value.trim());
+  }
+});
+
+$("searchResults").addEventListener("click", async (event) => {
+  const openBtn = event.target.closest("[data-search-open]");
+  if (openBtn) {
+    event.preventDefault();
+    event.stopPropagation();
+    const item = lastSearchItems[Number(openBtn.dataset.searchOpen)];
+    try {
+      await openSearchMail(item);
+    } catch (err) {
+      setBanner(err.message, true);
+    }
+    return;
+  }
+  const hit = event.target.closest("[data-search-index]");
+  if (!hit) return;
+  const item = lastSearchItems[Number(hit.dataset.searchIndex)];
+  document.querySelectorAll(".search-hit").forEach((el) => el.classList.toggle("on", el === hit));
+  try {
+    await focusSearchItem(item);
+  } catch (err) {
+    setBanner(err.message, true);
+  }
+});
+
+$("searchResults").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const hit = event.target.closest("[data-search-index]");
+  if (!hit) return;
+  event.preventDefault();
+  hit.click();
 });
 
 $("list").addEventListener("change", async (event) => {
@@ -769,7 +1034,7 @@ $("msLoginBtn").addEventListener("click", async () => {
     setBanner(err.message, true);
     $("advancedBox").open = true;
     if (String(err.message).includes("graph_client_id_missing") || t("graph_client_id_missing") === err.message) {
-      $("graphSetup").classList.remove("hidden");
+      $("graphSetup").open = true;
     }
   }
 });

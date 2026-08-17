@@ -21,6 +21,8 @@ from save_dates.config import (
     HOST,
     PENDING_LIST_LIMIT,
     PORT,
+    SEARCH_MAX_EMAILS,
+    SEARCH_SCAN_DAYS,
     STATIC_DIR,
 )
 from save_dates.extract import ensure_aware, local_tz
@@ -65,6 +67,33 @@ class SettingsPatch(BaseModel):
 class BatchRequest(BaseModel):
     action: str
     ids: list[int]
+
+
+class SearchPinRequest(BaseModel):
+    email_id: str
+    internet_id: str = ""
+    store_id: str = ""
+    mail_url: str = ""
+    subject: str
+    sender: str
+    received_at: str
+    title: str
+    start_at: str
+    end_at: str
+    all_day: bool = False
+    snippet: str = ""
+    matched_text: str = ""
+    confidence: float = 0.5
+    fuzzy: bool = False
+    kind: str = "event"
+    task_type: str = ""
+    mailbox: str = ""
+
+
+class SearchOpenRequest(BaseModel):
+    email_id: str = ""
+    store_id: str = ""
+    mail_url: str = ""
 
 
 def _parse_iso(value: str) -> datetime:
@@ -186,6 +215,24 @@ def _demo_candidates(lang: str = "zh") -> list[dict]:
                 "task_type": "ad",
                 "mailbox": "yuan@personal.com",
             },
+            {
+                "email_id": f"demo-{stamp}-5",
+                "internet_id": "",
+                "store_id": "",
+                "subject": "New Student Orientation / 迎新周",
+                "sender": "Student Affairs",
+                "received_at": now.isoformat(timespec="seconds"),
+                "title": "New Student Orientation",
+                "start_at": start.isoformat(timespec="minutes"),
+                "end_at": (start + timedelta(hours=1)).isoformat(timespec="minutes"),
+                "all_day": False,
+                "snippet": "Welcome to orientation week / 迎新周. Please come to the auditorium this Friday at 3:00 PM.",
+                "matched_text": "this Friday at 3:00 PM",
+                "confidence": 0.9,
+                "fuzzy": False,
+                "kind": "event",
+                "task_type": "",
+            },
         ]
     return [
         {
@@ -261,6 +308,24 @@ def _demo_candidates(lang: str = "zh") -> list[dict]:
             "kind": "promo",
             "task_type": "ad",
             "mailbox": "yuan@personal.com",
+        },
+        {
+            "email_id": f"demo-{stamp}-5",
+            "internet_id": "",
+            "store_id": "",
+            "subject": "迎新周 / Orientation 说明会",
+            "sender": "学生事务",
+            "received_at": now.isoformat(timespec="seconds"),
+            "title": "迎新周说明会",
+            "start_at": start.isoformat(timespec="minutes"),
+            "end_at": (start + timedelta(hours=1)).isoformat(timespec="minutes"),
+            "all_day": False,
+            "snippet": "欢迎参加迎新周 orientation。本周五下午3点在大礼堂集合。",
+            "matched_text": "本周五下午3点",
+            "confidence": 0.9,
+            "fuzzy": False,
+            "kind": "event",
+            "task_type": "",
         },
     ]
 
@@ -353,6 +418,63 @@ def api_list(status: str = "pending") -> dict:
         raise HTTPException(status_code=400, detail="invalid_status")
     items = db.list_candidates(None if status == "all" else status, limit=PENDING_LIST_LIMIT)
     return {"items": items, "counts": db.counts()}
+
+
+@app.get("/api/search")
+def api_search(q: str = "") -> dict:
+    from save_dates.search import run_search
+
+    return run_search(q, days=SEARCH_SCAN_DAYS, max_emails=SEARCH_MAX_EMAILS)
+
+
+@app.post("/api/search/pin")
+def api_search_pin(req: SearchPinRequest) -> dict:
+    payload = req.model_dump()
+    payload["kind"] = payload.get("kind") or "event"
+    existing = db.find_candidate_match(
+        payload["email_id"],
+        payload["title"],
+        payload["start_at"],
+        payload["kind"],
+        payload.get("task_type") or "",
+    )
+    if existing:
+        return {"item": existing, "counts": db.counts(), "added": 0}
+    db.insert_candidates([payload])
+    item = db.find_candidate_match(
+        payload["email_id"],
+        payload["title"],
+        payload["start_at"],
+        payload["kind"],
+        payload.get("task_type") or "",
+    )
+    if not item:
+        raise HTTPException(status_code=500, detail="candidate_missing")
+    watcher.notify(1)
+    return {"item": item, "counts": db.counts(), "added": 1}
+
+
+@app.post("/api/search/open-mail")
+def api_search_open_mail(req: SearchOpenRequest) -> dict:
+    email_id = str(req.email_id or "")
+    mail_url = str(req.mail_url or "")
+    if email_id.startswith("demo-"):
+        raise HTTPException(status_code=400, detail="mail_is_demo")
+    if not email_id and not mail_url:
+        raise HTTPException(status_code=400, detail="mail_not_found")
+    try:
+        watcher.open_mail(email_id, req.store_id or None, mail_url=mail_url)
+    except Exception as exc:
+        message = str(exc)
+        if message in {
+            "mail_not_found",
+            "mail_is_demo",
+            "outlook_not_connected",
+            "graph_login_needed",
+        }:
+            raise HTTPException(status_code=400, detail=message) from exc
+        raise HTTPException(status_code=500, detail="mail_open_failed") from exc
+    return {"ok": True}
 
 
 @app.patch("/api/candidates/{candidate_id}")

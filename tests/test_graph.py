@@ -1,6 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from save_dates.config import DEFAULT_GRAPH_CLIENT_ID, GRAPH_REDIRECT_URI, GRAPH_SCOPES
 from save_dates.graph_client import message_to_candidates
 
 TZ = ZoneInfo("America/New_York")
@@ -41,3 +42,19 @@ def test_graph_meeting_invite_is_skipped():
     )
     assert email_id == "graph:invite-1"
     assert items == []
+
+
+def test_graph_auth_is_public_native_client():
+    import inspect
+
+    from save_dates import graph_auth
+
+    source = inspect.getsource(graph_auth)
+    assert DEFAULT_GRAPH_CLIENT_ID == "65f4dd53-e782-46a4-a0b1-8ccd331dd6ff"
+    assert GRAPH_REDIRECT_URI == "http://localhost"
+    assert GRAPH_SCOPES == ("User.Read", "Mail.Read", "Mail.ReadWrite", "Calendars.ReadWrite")
+    assert "PublicClientApplication" in source
+    assert "acquire_token_interactive" in source
+    assert "http://localhost" in source
+    assert "client_secret" not in source
+    assert "client_credential" not in source

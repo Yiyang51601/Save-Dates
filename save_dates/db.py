@@ -147,6 +147,52 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     return item
 
 
+def list_searchable(limit: int = 200) -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit), 400))
+    with _lock:
+        conn = _connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT * FROM candidates
+                WHERE status IN ('pending', 'accepted')
+                ORDER BY received_at DESC, id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [_row_to_dict(r) for r in rows]
+        finally:
+            conn.close()
+
+
+def find_candidate_match(
+    email_id: str,
+    title: str,
+    start_at: str,
+    kind: str = "event",
+    task_type: str = "",
+) -> dict[str, Any] | None:
+    if not email_id:
+        return None
+    with _lock:
+        conn = _connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT * FROM candidates
+                WHERE email_id = ? AND title = ? AND start_at = ?
+                  AND kind = ? AND IFNULL(task_type, '') = ?
+                ORDER BY CASE status WHEN 'pending' THEN 0 WHEN 'accepted' THEN 1 ELSE 2 END, id DESC
+                LIMIT 1
+                """,
+                (email_id, title, start_at, kind or "event", task_type or ""),
+            ).fetchone()
+            return _row_to_dict(row) if row else None
+        finally:
+            conn.close()
+
+
 def list_candidates(status: str | None = "pending", limit: int = 80) -> list[dict[str, Any]]:
     limit = max(1, min(int(limit), 200))
     with _lock:

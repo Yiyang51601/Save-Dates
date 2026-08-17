@@ -26,6 +26,7 @@ from save_dates.graph_client import (
     open_graph_message,
     open_message_url,
     scan_inbox,
+    search_recent_mail,
 )
 
 
@@ -111,6 +112,17 @@ class GraphRuntime:
             if added:
                 self._notify(added)
             return result
+
+    def search_mail(self, query: str, days: int, max_emails: int) -> dict[str, Any]:
+        with self._lock:
+            token = acquire_token(False)
+            return search_recent_mail(
+                token,
+                query,
+                days=days,
+                max_emails=max_emails,
+                account=self._account,
+            )
 
     def create_event(self, **kwargs: Any) -> str:
         with self._lock:
