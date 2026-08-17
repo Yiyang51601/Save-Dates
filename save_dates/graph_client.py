@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import webbrowser
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
@@ -12,6 +13,7 @@ from save_dates.config import (
     CATEGORY_NAME,
     DEFAULT_MAX_EMAILS,
     DEFAULT_SCAN_DAYS,
+    EXTRACT_BODY_LIMIT,
     GRAPH_ID_PREFIX,
     LOCATION_WRITE_MAX,
     REMINDER_MINUTES_ALL_DAY,
@@ -21,6 +23,7 @@ from save_dates.config import (
 )
 from save_dates.display_title import attach_display_titles
 from save_dates.extract import (
+    combine_extracted_events,
     extract_all,
     html_to_text,
     local_tz,
@@ -28,6 +31,7 @@ from save_dates.extract import (
     score_search_fields,
     snippet_around_query,
 )
+from save_dates.ics import decode_ics_bytes, is_ics_name, parse_ics_events
 
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 MEETING_TYPES = {
@@ -51,6 +55,7 @@ def message_to_candidates(
     msg: dict[str, Any],
     now: datetime | None = None,
     mailbox: str = "",
+    token: str = "",
 ) -> tuple[str, list[dict[str, Any]]]:
     email_id = f"{GRAPH_ID_PREFIX}{msg.get('id') or ''}"
     if not msg.get("id"):
@@ -62,11 +67,19 @@ def message_to_candidates(
     if received is None:
         return email_id, []
 
+    msg = _hydrate_graph_message(msg, token)
     subject = str(msg.get("subject") or "(无主题)")
     sender = _sender_name(msg)
     body = _clipped_body(msg)
     now = now or datetime.now(local_tz())
     events = extract_all(subject, body, received, now=now, sender=sender)
+    try:
+        events = combine_extracted_events(
+            events,
+            _events_from_graph_ics(msg, subject, received, now, token),
+        )
+    except Exception:
+        pass
     web_link = str(msg.get("webLink") or "")
     internet_id = str(msg.get("internetMessageId") or "")
     candidates = [
@@ -132,7 +145,7 @@ def scan_inbox(
             if skip_check and skip_check(email_id):
                 skipped_processed += 1
                 continue
-            _, candidates = message_to_candidates(msg, now=now, mailbox=account)
+            _, candidates = message_to_candidates(msg, now=now, mailbox=account, token=token)
             if is_invite and not candidates:
                 skipped_invite += 1
                 scanned -= 1
@@ -159,6 +172,7 @@ def _search_hits_from_message(
     msg: dict[str, Any],
     now: datetime,
     mailbox: str,
+    token: str = "",
 ) -> list[dict[str, Any]]:
     subject = str(msg.get("subject") or "(无主题)")
     sender = _sender_name(msg)
@@ -166,7 +180,7 @@ def _search_hits_from_message(
     score, highlight = score_search_fields(query, subject, sender, body)
     if score < match_threshold(query):
         return []
-    _, candidates = message_to_candidates(msg, now=now, mailbox=mailbox)
+    _, candidates = message_to_candidates(msg, now=now, mailbox=mailbox, token=token)
     if candidates:
         hits: list[dict[str, Any]] = []
         for row in candidates:
@@ -247,7 +261,7 @@ def search_recent_mail(
             if msg.get("isDraft"):
                 continue
             scanned += 1
-            hits.extend(_search_hits_from_message(query, msg, now, account))
+            hits.extend(_search_hits_from_message(query, msg, now, account, token))
         url = payload.get("@odata.nextLink")
     return {"items": hits, "scanned": scanned}
 
@@ -393,7 +407,6 @@ def open_graph_message(token: str, email_id: str) -> None:
 def graph_request(method: str, url: str, token: str, **kwargs: Any) -> dict[str, Any]:
     headers = dict(kwargs.pop("headers", {}) or {})
     headers["Authorization"] = f"Bearer {token}"
-    headers.setdefault("Prefer", 'outlook.body-content-type="text"')
     with httpx.Client(timeout=30.0) as client:
         response = client.request(method, url, headers=headers, **kwargs)
         if response.status_code == 401:
@@ -410,8 +423,8 @@ def graph_request(method: str, url: str, token: str, **kwargs: Any) -> dict[str,
 def _messages_url(since: datetime, top: int, *, inbox_only: bool = True) -> str:
     iso = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     select = (
-        "id,subject,from,receivedDateTime,body,internetMessageId,"
-        "webLink,meetingMessageType,isDraft"
+        "id,subject,from,receivedDateTime,body,uniqueBody,bodyPreview,"
+        "internetMessageId,webLink,meetingMessageType,isDraft,hasAttachments"
     )
     query = (
         f"$orderby={quote('receivedDateTime desc')}"
@@ -440,14 +453,137 @@ def _sender_name(msg: dict[str, Any]) -> str:
     return str(address.get("name") or address.get("address") or "未知发件人")
 
 
-def _clipped_body(msg: dict[str, Any]) -> str:
+def _part_text(part: Any) -> str:
+    if not isinstance(part, dict):
+        return ""
+    content = str(part.get("content") or "")
+    if not content:
+        return ""
+    if str(part.get("contentType") or "").lower() == "html" or ("<" in content and ">" in content):
+        return html_to_text(content)
+    return html_to_text(content) if "<" in content else content
+
+
+def _body_looks_truncated(msg: dict[str, Any]) -> bool:
     body = msg.get("body") or {}
     content = str(body.get("content") or "")
-    if str(body.get("contentType") or "").lower() == "html":
-        content = html_to_text(content)
     preview = str(msg.get("bodyPreview") or "")
-    text = content or preview
-    return text[:BODY_CHAR_LIMIT] if len(text) > BODY_CHAR_LIMIT else text
+    if not content:
+        return True
+    if preview and content.strip() == preview.strip() and len(content) <= 512:
+        return True
+    if len(content) in {255, 256, 257, 1024, 1025}:
+        return True
+    lowered = content.lower()
+    if "<html" in lowered and "</body>" not in lowered and len(content) < 8000:
+        return True
+    return False
+
+
+def _hydrate_graph_message(msg: dict[str, Any], token: str) -> dict[str, Any]:
+    if not token or not msg.get("id"):
+        return msg
+    need_body = _body_looks_truncated(msg)
+    need_atts = bool(msg.get("hasAttachments")) and not msg.get("attachments")
+    if not need_body and not need_atts:
+        return msg
+    msg_id = quote(str(msg.get("id") or ""), safe="")
+    try:
+        if need_body:
+            full = graph_request(
+                "GET",
+                f"{GRAPH_ROOT}/me/messages/{msg_id}?$select=body,uniqueBody,bodyPreview,hasAttachments",
+                token,
+            )
+            merged = dict(msg)
+            if full.get("body"):
+                merged["body"] = full["body"]
+            if full.get("uniqueBody"):
+                merged["uniqueBody"] = full["uniqueBody"]
+            if full.get("bodyPreview"):
+                merged["bodyPreview"] = full["bodyPreview"]
+            if "hasAttachments" in full:
+                merged["hasAttachments"] = full["hasAttachments"]
+            msg = merged
+        if (need_atts or msg.get("hasAttachments")) and not msg.get("attachments"):
+            payload = graph_request(
+                "GET",
+                f"{GRAPH_ROOT}/me/messages/{msg_id}/attachments?$select=id,name,contentType",
+                token,
+            )
+            msg = dict(msg)
+            msg["attachments"] = payload.get("value") or []
+    except RuntimeError:
+        return msg
+    return msg
+
+
+def _clipped_body(msg: dict[str, Any]) -> str:
+    texts = [_part_text(msg.get("body")), _part_text(msg.get("uniqueBody"))]
+    preview = str(msg.get("bodyPreview") or "")
+    labeled = [
+        text
+        for text in texts
+        if text and any(token in text for token in ("地点", "Location:", "Venue:", "Where:", "地址"))
+    ]
+    if labeled:
+        text = max(labeled, key=len)
+    else:
+        nonempty = [text for text in texts if text]
+        text = max(nonempty, key=len) if nonempty else preview
+    if preview and len(text) < len(preview):
+        text = preview
+    return text[:EXTRACT_BODY_LIMIT]
+
+
+def _events_from_graph_ics(
+    msg: dict[str, Any],
+    subject: str,
+    received: datetime,
+    now: datetime,
+    token: str,
+) -> list:
+    events = []
+    tz = local_tz()
+    for att in msg.get("attachments") or []:
+        if not isinstance(att, dict):
+            continue
+        name = str(att.get("name") or "")
+        ctype = str(att.get("contentType") or "")
+        if not is_ics_name(name, ctype):
+            continue
+        raw = att.get("contentBytes")
+        text = ""
+        if raw:
+            try:
+                text = decode_ics_bytes(base64.b64decode(raw))
+            except Exception:
+                text = decode_ics_bytes(raw)
+        elif token and att.get("id") and msg.get("id"):
+            try:
+                payload = graph_request(
+                    "GET",
+                    f"{GRAPH_ROOT}/me/messages/{quote(str(msg.get('id')), safe='')}/attachments/{quote(str(att.get('id')), safe='')}?$select=contentBytes,name,contentType",
+                    token,
+                )
+                blob = payload.get("contentBytes") or ""
+                text = decode_ics_bytes(base64.b64decode(blob) if blob else b"")
+            except Exception:
+                text = ""
+        if not text:
+            continue
+        events.extend(
+            parse_ics_events(
+                text,
+                now=now,
+                tz=tz,
+                source_title=subject,
+                received_at=received,
+            )
+        )
+        if len(events) >= 50:
+            break
+    return events
 
 
 def _parse_graph_dt(value: Any) -> datetime | None:

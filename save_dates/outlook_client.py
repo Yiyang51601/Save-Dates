@@ -8,6 +8,7 @@ from save_dates.config import (
     CATEGORY_NAME,
     DEFAULT_MAX_EMAILS,
     DEFAULT_SCAN_DAYS,
+    EXTRACT_BODY_LIMIT,
     LOCATION_WRITE_MAX,
     REMINDER_MINUTES_ALL_DAY,
     REMINDER_MINUTES_TIMED,
@@ -17,6 +18,7 @@ from save_dates.config import (
 from save_dates.display_title import attach_display_titles
 from save_dates.extract import (
     ExtractedEvent,
+    combine_extracted_events,
     extract_all,
     extract_location_notes,
     html_to_text,
@@ -25,6 +27,7 @@ from save_dates.extract import (
     score_search_fields,
     snippet_around_query,
 )
+from save_dates.ics import decode_ics_bytes, is_ics_name, parse_ics_events
 
 OL_MAIL = 43
 OL_APPOINTMENT_ITEM = 26
@@ -39,6 +42,8 @@ OL_MAIL_ITEM_TYPE = 0
 OL_EXCHANGE_PUBLIC_FOLDER = 1
 PR_INTERNET_MESSAGE_ID = "http://schemas.microsoft.com/mapi/proptag/0x1035001F"
 PR_LIST_UNSUBSCRIBE = "http://schemas.microsoft.com/mapi/proptag/0x1045001F"
+PR_ATTACH_DATA_BIN = "http://schemas.microsoft.com/mapi/proptag/0x37010102"
+PR_ATTACH_MIME_TAG = "http://schemas.microsoft.com/mapi/proptag/0x370E001F"
 PR_STORE_SMTP = (
     "http://schemas.microsoft.com/mapi/proptag/0x39FE001F",
     "http://schemas.microsoft.com/mapi/proptag/0x5D01001F",
@@ -113,17 +118,131 @@ def _safe_str(item: Any, name: str, default: str = "") -> str:
 
 
 def _clipped_body(item: Any) -> str:
+    html = _safe_str(item, "HTMLBody")
+    html_text = html_to_text(html) if html else ""
     try:
         raw = item.Body
     except Exception:
         raw = None
-    if raw:
-        text = str(raw)
-        return text[:BODY_CHAR_LIMIT] if len(text) > BODY_CHAR_LIMIT else text
-    html = _safe_str(item, "HTMLBody")
-    if not html:
+    plain = str(raw) if raw else ""
+    if len(plain) > EXTRACT_BODY_LIMIT:
+        plain = plain[:EXTRACT_BODY_LIMIT]
+    candidates = [text for text in (html_text, plain) if text]
+    if not candidates:
         return ""
-    return html_to_text(html)[:BODY_CHAR_LIMIT]
+    labeled = [
+        text
+        for text in candidates
+        if any(token in text for token in ("地点", "Location:", "Venue:", "Where:", "地址"))
+    ]
+    if labeled:
+        return max(labeled, key=len)[:EXTRACT_BODY_LIMIT]
+    return max(candidates, key=len)[:EXTRACT_BODY_LIMIT]
+
+
+def _attachment_filename(att: Any) -> str:
+    for name in ("FileName", "DisplayName"):
+        value = _safe_str(att, name)
+        if value:
+            return value
+    return ""
+
+
+def _attachment_mime(att: Any) -> str:
+    try:
+        return str(att.PropertyAccessor.GetProperty(PR_ATTACH_MIME_TAG) or "")
+    except Exception:
+        return ""
+
+
+def _as_bytes(data: Any) -> bytes:
+    if data is None:
+        return b""
+    if isinstance(data, bytes):
+        return data
+    if isinstance(data, bytearray):
+        return bytes(data)
+    if isinstance(data, str):
+        return data.encode("utf-8", errors="replace")
+    if isinstance(data, (list, tuple)):
+        try:
+            return bytes(data)
+        except Exception:
+            return b""
+    try:
+        return bytes(data)
+    except Exception:
+        return b""
+
+
+def _attachment_bytes(att: Any) -> bytes:
+    try:
+        data = att.PropertyAccessor.GetProperty(PR_ATTACH_DATA_BIN)
+        raw = _as_bytes(data)
+        if raw:
+            return raw
+    except Exception:
+        pass
+    path = ""
+    try:
+        import tempfile
+        from pathlib import Path
+
+        handle = tempfile.NamedTemporaryFile(prefix="savedates-ics-", suffix=".ics", delete=False)
+        path = handle.name
+        handle.close()
+        att.SaveAsFile(path)
+        return Path(path).read_bytes()
+    except Exception:
+        return b""
+    finally:
+        if path:
+            try:
+                from pathlib import Path
+
+                Path(path).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+def _events_from_ics_attachments(
+    item: Any,
+    subject: str,
+    received: datetime,
+    now: datetime,
+) -> list[ExtractedEvent]:
+    events: list[ExtractedEvent] = []
+    try:
+        attachments = getattr(item, "Attachments", None)
+    except Exception:
+        return events
+    try:
+        tz = local_tz()
+        for att in _com_items(attachments):
+            try:
+                name = _attachment_filename(att)
+                mime = _attachment_mime(att)
+                if not is_ics_name(name, mime):
+                    continue
+                text = decode_ics_bytes(_attachment_bytes(att))
+                if not text:
+                    continue
+                events.extend(
+                    parse_ics_events(
+                        text,
+                        now=now,
+                        tz=tz,
+                        source_title=subject,
+                        received_at=received,
+                    )
+                )
+            except Exception:
+                continue
+            if len(events) >= 50:
+                break
+    except Exception:
+        return events
+    return events
 
 
 def _meeting_times(item: Any) -> tuple[datetime, datetime, bool] | None:
@@ -162,6 +281,13 @@ def _events_from_item(
         list_unsubscribe=list_unsubscribe,
         sender=sender,
     )
+    try:
+        events = combine_extracted_events(
+            events,
+            _events_from_ics_attachments(item, subject, received, now),
+        )
+    except Exception:
+        pass
     if events or not _is_meeting_invite(item):
         return events
     times = _meeting_times(item)

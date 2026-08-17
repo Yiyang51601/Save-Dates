@@ -265,47 +265,135 @@ def insert_candidates(items: list[dict[str, Any]]) -> int:
     with _lock:
         conn = _connect()
         try:
-            for item in items:
-                try:
-                    conn.execute(
-                        """
-                        INSERT INTO candidates (
-                            email_id, internet_id, store_id, mail_url, subject, sender, received_at,
-                            title, start_at, end_at, all_day, snippet, matched_text,
-                            confidence, fuzzy, kind, task_type, mailbox, location, notes, status, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-                        """,
-                        (
-                            item["email_id"],
-                            item.get("internet_id"),
-                            item.get("store_id") or "",
-                            item.get("mail_url") or "",
-                            item["subject"],
-                            item["sender"],
-                            item["received_at"],
-                            item["title"],
-                            item["start_at"],
-                            item["end_at"],
-                            1 if item.get("all_day") else 0,
-                            item.get("snippet", ""),
-                            item.get("matched_text", ""),
-                            float(item.get("confidence", 0.5)),
-                            1 if item.get("fuzzy") else 0,
-                            item.get("kind") or "event",
-                            item.get("task_type") or "",
-                            item.get("mailbox") or "",
-                            item.get("location") or "",
-                            item.get("notes") or "",
-                            now,
-                        ),
-                    )
-                    inserted += 1
-                except sqlite3.IntegrityError:
-                    continue
+            inserted = _insert_rows(conn, items, now)
             conn.commit()
         finally:
             conn.close()
     return inserted
+
+
+def save_scan_candidates(items: list[dict[str, Any]]) -> int:
+    """Replace pending cards for the same emails, then insert the new extraction."""
+    if not items:
+        return 0
+    now = datetime.now().isoformat(timespec="seconds")
+    email_ids = {str(item.get("email_id") or "") for item in items if item.get("email_id")}
+    inserted = 0
+    with _lock:
+        conn = _connect()
+        try:
+            for email_id in email_ids:
+                conn.execute(
+                    "DELETE FROM candidates WHERE email_id = ? AND status = 'pending'",
+                    (email_id,),
+                )
+            inserted = _insert_rows(conn, items, now)
+            conn.commit()
+        finally:
+            conn.close()
+    return inserted
+
+
+def enrich_related_pending() -> None:
+    with _lock:
+        conn = _connect()
+        try:
+            _enrich_related_pending(conn)
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def _insert_rows(conn: sqlite3.Connection, items: list[dict[str, Any]], now: str) -> int:
+    inserted = 0
+    for item in items:
+        try:
+            conn.execute(
+                """
+                INSERT INTO candidates (
+                    email_id, internet_id, store_id, mail_url, subject, sender, received_at,
+                    title, start_at, end_at, all_day, snippet, matched_text,
+                    confidence, fuzzy, kind, task_type, mailbox, location, notes, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                """,
+                (
+                    item["email_id"],
+                    item.get("internet_id"),
+                    item.get("store_id") or "",
+                    item.get("mail_url") or "",
+                    item["subject"],
+                    item["sender"],
+                    item["received_at"],
+                    item["title"],
+                    item["start_at"],
+                    item["end_at"],
+                    1 if item.get("all_day") else 0,
+                    item.get("snippet", ""),
+                    item.get("matched_text", ""),
+                    float(item.get("confidence", 0.5)),
+                    1 if item.get("fuzzy") else 0,
+                    item.get("kind") or "event",
+                    item.get("task_type") or "",
+                    item.get("mailbox") or "",
+                    item.get("location") or "",
+                    item.get("notes") or "",
+                    now,
+                ),
+            )
+            inserted += 1
+        except sqlite3.IntegrityError:
+            continue
+    return inserted
+
+
+def _enrich_related_pending(conn: sqlite3.Connection) -> None:
+    from save_dates.extract import merge_related_events
+
+    rows = conn.execute(
+        "SELECT * FROM candidates WHERE status = 'pending' AND IFNULL(kind, 'event') = 'event'"
+    ).fetchall()
+    if len(rows) < 2:
+        return
+    items = [_row_to_dict(row) for row in rows]
+    merge_related_events(items)
+    by_id = {int(item["id"]): item for item in items if item.get("id")}
+    for row in rows:
+        item = by_id.get(int(row["id"]))
+        if not item:
+            continue
+        fields = {
+            "location": item.get("location") or "",
+            "notes": item.get("notes") or "",
+            "start_at": item.get("start_at") or row["start_at"],
+            "end_at": item.get("end_at") or row["end_at"],
+            "all_day": 1 if item.get("all_day") else 0,
+        }
+        if (
+            fields["location"] == (row["location"] or "")
+            and fields["notes"] == (row["notes"] or "")
+            and fields["start_at"] == row["start_at"]
+            and fields["end_at"] == row["end_at"]
+            and fields["all_day"] == int(row["all_day"] or 0)
+        ):
+            continue
+        try:
+            conn.execute(
+                """
+                UPDATE candidates
+                SET location = ?, notes = ?, start_at = ?, end_at = ?, all_day = ?
+                WHERE id = ? AND status = 'pending'
+                """,
+                (
+                    fields["location"],
+                    fields["notes"],
+                    fields["start_at"],
+                    fields["end_at"],
+                    fields["all_day"],
+                    row["id"],
+                ),
+            )
+        except sqlite3.IntegrityError:
+            continue
 
 
 def update_candidate(candidate_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
@@ -426,6 +514,21 @@ def mark_seen(email_id: str) -> None:
                 (email_id, datetime.now().isoformat(timespec="seconds")),
             )
             conn.commit()
+        finally:
+            conn.close()
+
+
+def is_processed(email_id: str) -> bool:
+    if not email_id:
+        return True
+    with _lock:
+        conn = _connect()
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM processed_emails WHERE email_id = ? LIMIT 1",
+                (email_id,),
+            ).fetchone()
+            return row is not None
         finally:
             conn.close()
 

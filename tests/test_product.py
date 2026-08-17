@@ -933,3 +933,78 @@ def test_scan_clamps_cap_lookback_and_count():
     assert clamp_scan_emails(5000) == MAX_SCAN_EMAILS
     assert clamp_scan_days(180) == 180
     assert clamp_scan_emails(500) == 500
+
+
+def test_classic_mail_reads_ics_attachments():
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    from save_dates.outlook_client import mail_to_candidates
+
+    ics = """BEGIN:VCALENDAR
+BEGIN:VEVENT
+DTSTART;TZID=America/New_York:20260824T090000
+DTEND;TZID=America/New_York:20260824T105000
+SUMMARY:EPID 2180 Lecture
+LOCATION:Public Health Building A521
+END:VEVENT
+BEGIN:VEVENT
+DTSTART;TZID=America/New_York:20260825T140000
+DTEND;TZID=America/New_York:20260825T155000
+SUMMARY:GSR meeting
+LOCATION:GSPH Room 221
+END:VEVENT
+END:VCALENDAR
+"""
+    now = datetime(2026, 8, 17, 13, 0, tzinfo=ZoneInfo("America/New_York"))
+
+    class Attachment:
+        FileName = "ClassesandGSR_Yiyang.ics"
+        DisplayName = "ClassesandGSR_Yiyang.ics"
+
+        class PropertyAccessor:
+            @staticmethod
+            def GetProperty(name):
+                if "370E" in name:
+                    return "text/calendar"
+                return ics.encode("utf-8")
+
+    class Attachments:
+        Count = 1
+
+        def Item(self, index):
+            assert index == 1
+            return Attachment()
+
+    class Mail:
+        Class = 43
+        MessageClass = "IPM.Note"
+        Subject = "Class and GSR calendar"
+        SenderName = "Yiyang"
+        SenderEmailAddress = "y@pitt.edu"
+        EntryID = "ics-mail-1"
+        Body = "Please see the attached calendar."
+        HTMLBody = ""
+        ReceivedTime = datetime(2026, 8, 16, 13, 0, tzinfo=timezone.utc)
+
+        class PropertyAccessor:
+            @staticmethod
+            def GetProperty(_name):
+                raise RuntimeError("no")
+
+        class Parent:
+            class Store:
+                StoreID = "pitt"
+                DisplayName = "yic327@pitt.edu"
+
+    mail = Mail()
+    mail.Attachments = Attachments()
+    email_id, items = mail_to_candidates(mail, now=now)
+    assert email_id == "ics-mail-1"
+    titles = {row["title"] for row in items}
+    assert "EPID 2180 Lecture" in titles
+    assert "GSR meeting" in titles
+    lecture = next(row for row in items if row["title"] == "EPID 2180 Lecture")
+    assert "Public Health Building" in lecture["location"]
+    assert "2026-08-24" in lecture["start_at"]
+

@@ -153,16 +153,17 @@ class OutlookRuntime:
 
             def sink(items: list[dict[str, Any]]) -> None:
                 nonlocal added
-                added += db.insert_candidates(items)
+                added += db.save_scan_candidates(items)
 
             result = scan_inbox_with_namespace(
                 self._ns,
                 days=days,
                 max_emails=max_emails,
-                skip_check=None if include_processed else db.is_handled,
+                skip_check=None if include_processed else db.is_processed,
                 sink=sink,
                 mark_seen=db.mark_seen,
             )
+            db.enrich_related_pending()
             self._mailboxes = list(result.get("mailboxes") or [])
             self._unread_mailboxes = list(result.get("unread_mailboxes") or [])
             result["added"] = added
@@ -265,9 +266,10 @@ class OutlookRuntime:
             _, candidates = mail_to_candidates(item)
         except Exception:
             return
-        added = db.insert_candidates(candidates) if candidates else 0
+        added = db.save_scan_candidates(candidates) if candidates else 0
         db.mark_seen(email_id)
         if added:
+            db.enrich_related_pending()
             self.notify(added)
 
     def handle_outlook_quit(self) -> None:

@@ -161,3 +161,52 @@ def test_graph_calendar_omits_empty_location(monkeypatch):
     )
     assert "location" not in captured["json"]
     assert captured["json"]["body"]["content"] == "source"
+
+
+def test_graph_message_reads_ics_attachments():
+    import base64
+
+    ics = """BEGIN:VCALENDAR
+BEGIN:VEVENT
+DTSTART;TZID=America/New_York:20260824T090000
+DTEND;TZID=America/New_York:20260824T105000
+SUMMARY:EPID 2180 Lecture
+LOCATION:Public Health Building A521
+END:VEVENT
+BEGIN:VEVENT
+DTSTART;TZID=America/New_York:20260825T140000
+DTEND;TZID=America/New_York:20260825T155000
+SUMMARY:GSR meeting
+LOCATION:GSPH Room 221
+END:VEVENT
+END:VCALENDAR
+"""
+    email_id, items = message_to_candidates(
+        {
+            "id": "ics-graph-1",
+            "subject": "Class and GSR calendar",
+            "from": {"emailAddress": {"name": "Yiyang", "address": "y@pitt.edu"}},
+            "receivedDateTime": "2026-08-16T13:00:00Z",
+            "body": {"contentType": "text", "content": "Please see attached."},
+            "hasAttachments": True,
+            "attachments": [
+                {
+                    "id": "att-1",
+                    "name": "ClassesandGSR_Yiyang.ics",
+                    "contentType": "text/calendar",
+                    "contentBytes": base64.b64encode(ics.encode("utf-8")).decode("ascii"),
+                }
+            ],
+            "meetingMessageType": "none",
+            "isDraft": False,
+        },
+        now=NOW,
+    )
+    assert email_id == "graph:ics-graph-1"
+    titles = {row["title"] for row in items}
+    assert "EPID 2180 Lecture" in titles
+    assert "GSR meeting" in titles
+    lecture = next(row for row in items if row["title"] == "EPID 2180 Lecture")
+    assert "A521" in lecture["location"]
+    assert "2026-08-24" in lecture["start_at"]
+

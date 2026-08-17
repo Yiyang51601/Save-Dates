@@ -47,7 +47,7 @@ hiddenimports = [
     "save_dates.desktop",
     "save_dates.watcher",
     "save_dates.outlook_client",
-    "save_dates.extract",
+    "save_dates.ics",
     "save_dates.db",
     "save_dates.graph_auth",
     "save_dates.graph_client",

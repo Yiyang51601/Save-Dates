@@ -435,3 +435,111 @@ def test_zoom_still_used_when_mail_has_no_building():
         "Seminar on August 22, 2026 at 10:00 AM\nJoin Zoom: https://example.zoom.us/j/555",
     )
     assert "zoom.us" in event.location.lower()
+
+
+def test_html_location_after_rsvp_and_empty_tags():
+    body = """
+    <html><body>
+    <p>Please RSVP by August 3 at
+    <a href="https://pitt.qualtrics.com/jfe/form/SV_test123">this Qualtrics form</a>.</p>
+    <p><span>地点：</span></p>
+    <p></p>
+    <p><br></p>
+    <p>Public Health Building 5楼，A521/A522</p>
+    </body></html>
+    """
+    event = _first(
+        "(REMINDER) - Pitt Public Health Epidemiology Orientation - August 20, 2026",
+        body,
+        received=datetime(2026, 8, 17, 9, 0, tzinfo=TZ),
+    )
+    assert event.start.date().isoformat() == "2026-08-20"
+    assert "Public Health Building" in event.location
+    assert "A521" in event.location
+    assert "qualtrics" not in event.location.lower()
+    assert "qualtrics" in event.notes.lower()
+
+
+def test_html_table_joins_location_label_and_building():
+    from save_dates.extract import extract_location_notes, html_to_text
+
+    html = """
+    <table>
+      <tr><td>地点：</td><td></td></tr>
+      <tr><td></td></tr>
+      <tr><td>Public Health Building</td><td>5F</td><td>A521</td></tr>
+    </table>
+    """
+    text = html_to_text(html)
+    assert "地点" in text
+    assert "Public Health Building" in text
+    location, _notes = extract_location_notes("迎新", html)
+    assert "Public Health Building" in location
+    assert "A521" in location
+
+
+def test_reminder_subject_date_beats_rsvp_and_sent_clock():
+    body = (
+        "Sent: Monday, August 17, 2026 9:04 AM\n"
+        "Please RSVP by August 3: https://pitt.qualtrics.com/jfe/form/SV_abc\n"
+        "回复截止日期：2026年8月3日\n"
+    )
+    received = datetime(2026, 8, 17, 9, 0, tzinfo=TZ)
+    events = extract_events(
+        "(REMINDER) - Pitt Public Health Epidemiology New Student Orientation - August 20, 2026",
+        body,
+        received,
+        now=datetime(2026, 8, 17, 13, 0, tzinfo=TZ),
+        tz=TZ,
+    )
+    assert events
+    dates = {event.start.date().isoformat() for event in events}
+    assert "2026-08-20" in dates
+    assert "2026-08-17" not in dates
+    assert "2026-08-03" not in dates
+    assert all("qualtrics" not in (event.location or "").lower() for event in events)
+    assert any("qualtrics" in (event.notes or "").lower() for event in events)
+
+
+def test_qualtrics_url_is_notes_not_location():
+    event = _first(
+        "Orientation RSVP",
+        "Join us on August 21, 2026.\nLocation: https://pitt.qualtrics.com/jfe/form/SV_nope\nVenue: Alumni Hall Room 200",
+    )
+    assert "Alumni Hall" in event.location
+    assert "qualtrics" not in event.location.lower()
+    assert "qualtrics" in event.notes.lower()
+
+
+def test_merge_related_reminder_reuses_location_and_subject_date():
+    from save_dates.extract import merge_related_events
+
+    original = {
+        "kind": "event",
+        "title": "Pitt Public Health Epidemiology New Student Orientation",
+        "subject": "Pitt Public Health Epidemiology New Student Orientation - August 20, 2026",
+        "sender": "Amy Rhodes",
+        "start_at": "2026-08-20T00:00",
+        "end_at": "2026-08-21T00:00",
+        "all_day": True,
+        "location": "Public Health Building 5楼 A521/A522",
+        "notes": "入口：Fifth Avenue",
+        "confidence": 0.9,
+    }
+    reminder = {
+        "kind": "event",
+        "title": "(REMINDER) - Pitt Public Health Epidemiology New Student Orientation",
+        "subject": "(REMINDER) - Pitt Public Health Epidemiology New Student Orientation - August 20, 2026",
+        "sender": "Amy Rhodes",
+        "start_at": "2026-08-17T00:00",
+        "end_at": "2026-08-18T00:00",
+        "all_day": True,
+        "location": "",
+        "notes": "",
+        "confidence": 0.5,
+        "fuzzy": False,
+    }
+    merge_related_events([original, reminder])
+    assert "Public Health Building" in reminder["location"]
+    assert "Fifth Avenue" in reminder["notes"]
+    assert reminder["start_at"].startswith("2026-08-20")

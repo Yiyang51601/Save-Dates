@@ -103,17 +103,18 @@ class GraphRuntime:
 
             def sink(items: list[dict[str, Any]]) -> None:
                 nonlocal added
-                added += db.insert_candidates(items)
+                added += db.save_scan_candidates(items)
 
             result = scan_inbox(
                 token,
                 days=days,
                 max_emails=max_emails,
-                skip_check=None if include_processed else db.is_handled,
+                skip_check=None if include_processed else db.is_processed,
                 sink=sink,
                 mark_seen=db.mark_seen,
                 account=self._account,
             )
+            db.enrich_related_pending()
             result["added"] = added
             result["mailboxes"] = self.mailboxes()
             if added:
@@ -212,7 +213,7 @@ class GraphRuntime:
         added_total = 0
         newest = since
         for msg in reversed(messages):
-            email_id, candidates = message_to_candidates(msg, mailbox=self._account)
+            email_id, candidates = message_to_candidates(msg, mailbox=self._account, token=token)
             received = None
             try:
                 received = datetime.fromisoformat(str(msg.get("receivedDateTime") or "").replace("Z", "+00:00"))
@@ -223,9 +224,11 @@ class GraphRuntime:
             if not email_id or email_id in self._recent_ids or db.is_handled(email_id):
                 continue
             self._recent_ids.append(email_id)
-            added = db.insert_candidates(candidates) if candidates else 0
+            added = db.save_scan_candidates(candidates) if candidates else 0
             db.mark_seen(email_id)
             added_total += added
+        if added_total:
+            db.enrich_related_pending()
         if newest:
             self._last_received = newest.astimezone(timezone.utc).isoformat()
             self._save_state()

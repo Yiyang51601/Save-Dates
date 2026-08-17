@@ -13,7 +13,7 @@ from bs4 import BeautifulSoup
 from tzlocal import get_localzone
 
 from save_dates.config import (
-    BODY_CHAR_LIMIT,
+    EXTRACT_BODY_LIMIT,
     LOCATION_WRITE_MAX,
     MAX_FUTURE_DAYS,
     NOTES_FIELD_MAX,
@@ -111,20 +111,29 @@ class ExtractedEvent:
     task_type: str = ""
     location: str = ""
     notes: str = ""
+    date_kind: str = ""
 
 
-def html_to_text(raw: str) -> str:
+def html_to_text(raw: str, limit: int | None = None) -> str:
     if not raw:
         return ""
+    cap = EXTRACT_BODY_LIMIT if limit is None else limit
     if "<" in raw and ">" in raw:
         soup = BeautifulSoup(raw, "lxml")
         for tag in soup(["script", "style", "head"]):
             tag.decompose()
         for br in soup.find_all("br"):
             br.replace_with("\n")
-        for tag in soup.find_all(["p", "div", "tr", "li", "h1", "h2", "h3", "h4", "blockquote", "hr", "table", "section"]):
+        for tag in soup.find_all("a"):
+            href = (tag.get("href") or "").strip()
+            if href.startswith("http"):
+                tag.append(f" {href}")
+        for tag in soup.find_all(["p", "div", "tr", "td", "th", "li", "h1", "h2", "h3", "h4", "blockquote", "hr", "table", "section", "article"]):
             tag.insert_before("\n")
             tag.append("\n")
+        for tag in soup.find_all(["span", "font", "b", "i", "em", "strong", "u", "a"]):
+            if not tag.get_text(strip=True):
+                tag.decompose()
         # Space between inline tags so 地点： / Location: stay one token.
         text = soup.get_text(" ")
     else:
@@ -136,7 +145,7 @@ def html_to_text(raw: str) -> str:
     text = re.sub(r"\n[ \t]+", "\n", text)
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()[:BODY_CHAR_LIMIT]
+    return text.strip()[:cap]
 
 
 _LOCATION_LABELS = (
@@ -161,6 +170,12 @@ _SKIP_LABELS = (
 _MEET_URL = re.compile(
     r"https?://[^\s<>\"']*(?:zoom\.us|zoom\.com|teams\.microsoft\.com|teams\.live\.com|"
     r"meet\.google\.com|webex\.com|gotomeet(?:ing)?\.com)[^\s<>\"']*",
+    re.I,
+)
+_FORM_URL = re.compile(
+    r"https?://[^\s<>\"']*(?:qualtrics\.com|forms\.gle|forms\.office\.com|"
+    r"forms\.cloud\.microsoft|microsoft\.com/forms|typeform\.com|surveymonkey\.com|"
+    r"wufoo\.com|eventbrite\.com)[^\s<>\"']*",
     re.I,
 )
 _ONLINE_LOC = re.compile(
@@ -220,7 +235,7 @@ _PLACE_HINT = re.compile(
     r"楼|室|礼堂|教室|报告厅|大厅|大厦|图书馆"
 )
 _NOTE_LOOSE = re.compile(
-    r"(?i)((?:please\s+)?(?:bring|rsvp\b|enter(?:\s+via)?|park(?:ing)?(?:\s+at)?|"
+    r"(?i)((?:please\s+)?(?:bring|rsvp(?:\s*-?\s*by)?|enter(?:\s+via)?|park(?:ing)?(?:\s+at)?|"
     r"wear|dress(?:\s+code)?)\s*[^\n。.]{3,72})"
 )
 _HEADER_LINE = re.compile(
@@ -263,7 +278,7 @@ def _all_field_labels() -> tuple[str, ...]:
 
 
 _FIELD_LABEL_RE = re.compile(
-    r"(?i)(?:^|[\n\r;；。])\s*(?P<label>"
+    r"(?i)(?:^|[\n\r;；。]|(?<![A-Za-z0-9]))(?P<label>"
     + "|".join(re.escape(label) for label in _all_field_labels())
     + r")(?:\s*[:：]|(?<=[\u4e00-\u9fff])\s*(?=\n))"
 )
@@ -331,9 +346,19 @@ def _is_org_name(value: str) -> bool:
 
 def _looks_like_venue(value: str) -> bool:
     text = (value or "").strip()
-    if not text or _is_dateish(text) or _is_org_name(text):
+    if not text or _is_dateish(text) or _is_org_name(text) or _is_form_url(text):
         return False
     return bool(_VENUE_HINT.search(text) or _EN_NAMED_PLACE.search(text) or _ONLINE_LOC.match(text))
+
+
+def _is_form_url(value: str) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return False
+    if _FORM_URL.search(text):
+        return True
+    lowered = text.casefold()
+    return "qualtrics.com" in lowered or "forms.gle" in lowered
 
 
 def _norm_label(label: str) -> str:
@@ -386,7 +411,7 @@ def _join_place(*parts: str) -> str:
     blob = ""
     for part in parts:
         piece = _clean_loc(part)
-        if not piece or _is_dateish(piece) or _is_org_name(piece):
+        if not piece or _is_dateish(piece) or _is_org_name(piece) or _is_form_url(piece):
             continue
         lowered = piece.casefold()
         if blob and lowered in blob.casefold():
@@ -504,7 +529,9 @@ def extract_location_notes(subject: str, body: str) -> tuple[str, str]:
         if label in skip_labels:
             continue
         if label in loc_labels:
-            if _is_org_name(value):
+            if _is_org_name(value) or _is_form_url(value):
+                if _is_form_url(value):
+                    add_note("RSVP", value, phrase=False)
                 continue
             if label in {"building", "大楼", "大厦"}:
                 building = building or value
@@ -535,10 +562,15 @@ def extract_location_notes(subject: str, body: str) -> tuple[str, str]:
         location = _join_place(location, first_url)
     elif not location and first_url:
         location = first_url[:LOCATION_WRITE_MAX]
+    if location and _is_form_url(location):
+        add_note("RSVP", location, phrase=False)
+        location = ""
     for url in urls:
         if location and url.casefold() in location.casefold():
             continue
         add_note("链接", url, phrase=False)
+    for match in _FORM_URL.finditer(text):
+        add_note("RSVP", match.group(0).rstrip(").,;；，]>\"'"), phrase=False)
 
     if not labeled_notes:
         for match in _NOTE_LOOSE.finditer(text):
@@ -732,6 +764,7 @@ def _add_event(
     now: datetime,
     extra_confidence: float = 0.0,
     fuzzy: bool = False,
+    date_kind: str = "",
 ) -> None:
     if not _valid_future(start, now):
         return
@@ -757,6 +790,7 @@ def _add_event(
             confidence=round(confidence, 2),
             fuzzy=fuzzy,
             kind="event",
+            date_kind=date_kind,
         )
     )
 
@@ -841,7 +875,7 @@ def _line_at(text: str, pos: int) -> str:
 
 def _weekday_is_stamp(text: str, match: re.Match) -> bool:
     """Skip weekdays that belong to a sent/received clock, not the event."""
-    if _HEADER_LINE.match(_line_at(text, match.start())):
+    if _HEADER_LINE.search(_line_at(text, match.start())):
         return True
     if _EN_MONTH_AFTER_DOW.match(text[match.end() :]):
         return True
@@ -849,6 +883,30 @@ def _weekday_is_stamp(text: str, match: re.Match) -> bool:
     if _CN_DATE_BEFORE_DOW.search(before):
         return True
     return False
+
+
+_DEADLINE_LEFT = re.compile(
+    r"(?is)(?:rsvp\s*(?:by|before|deadline)?|please\s+rsvp|reply\s+by|respond\s+by|"
+    r"due\s+(?:by|on)|deadline|"
+    r"回复截止|报名截止|截止(?:日期|时间)?)\s*[:：]?\s*$"
+)
+
+
+def _ymd_is_stamp(text: str, match: re.Match) -> bool:
+    """Skip sent/received clock dates so they are not the event start."""
+    line = _line_at(text, match.start())
+    if _HEADER_LINE.search(line):
+        return True
+    line_start = text.rfind("\n", 0, match.start()) + 1
+    prefix = text[line_start : match.start()]
+    if re.search(r"(?i)(?:from|sent(?:\s+on)?|received|date)\s*[:：]", prefix):
+        return True
+    return False
+
+
+def _in_deadline_context(text: str, start: int) -> bool:
+    left = (text or "")[max(0, start - 48) : start]
+    return bool(_DEADLINE_LEFT.search(left))
 
 
 def extract_events(
@@ -861,9 +919,14 @@ def extract_events(
     tz = tz or local_tz()
     received_at = ensure_aware(received_at, tz)
     now = ensure_aware(now or datetime.now(tz), tz)
-    text = html_to_text("\n".join(part for part in (subject, body) if part))
+    subject_text = html_to_text(subject or "")
+    body_text = html_to_text(body or "")
+    text = "\n".join(part for part in (subject_text, body_text) if part)
     if not text:
         return []
+    subject_end = len(subject_text)
+    if subject_text and body_text:
+        subject_end += 1
 
     events: list[ExtractedEvent] = []
     occupied: list[tuple[int, int]] = []
@@ -900,9 +963,15 @@ def extract_events(
     def handle_ymd(year: int, month: int, day: int, match: re.Match, extra_confidence: float = 0.0) -> None:
         if overlaps(*match.span()):
             return
+        if _ymd_is_stamp(text, match):
+            consume(match.span())
+            return
         day_dt = _safe_date(year, month, day, tz)
         if not day_dt:
             return
+        in_subject = match.start() < subject_end
+        deadline = (not in_subject) and _in_deadline_context(text, match.start())
+        extra = extra_confidence + (0.24 if in_subject else 0.0)
         t = _parse_time_near(text, match.end())
         start, end, all_day = _apply_time(day_dt, t)
         _add_event(
@@ -916,7 +985,8 @@ def extract_events(
             all_day,
             match.group(0),
             now,
-            extra_confidence=extra_confidence,
+            extra_confidence=extra,
+            date_kind="deadline" if deadline else "",
         )
         consume(match.span())
 
@@ -943,7 +1013,7 @@ def extract_events(
         handle_ymd(year, month, int(m["d"]), m, extra_confidence=0.12)
 
     for m in _CN_MD.finditer(text):
-        if overlaps(*m.span()):
+        if overlaps(*m.span()) or _ymd_is_stamp(text, m):
             continue
         month, day = int(m["m"]), int(m["d"])
         year = received_at.year
@@ -954,9 +1024,15 @@ def extract_events(
             day_dt = _safe_date(year + 1, month, day, tz)
             if not day_dt:
                 continue
+        in_subject = m.start() < subject_end
+        deadline = (not in_subject) and _in_deadline_context(text, m.start())
+        extra = 0.08 + (0.24 if in_subject else 0.0)
         t = _parse_time_near(text, m.end())
         start, end, all_day = _apply_time(day_dt, t)
-        _add_event(events, subject, text, m.start(), m.end(), start, end, all_day, m.group(0), now, extra_confidence=0.08)
+        _add_event(
+            events, subject, text, m.start(), m.end(), start, end, all_day, m.group(0), now,
+            extra_confidence=extra, date_kind="deadline" if deadline else "",
+        )
         consume(m.span())
 
     for m in _CN_WEEK.finditer(text):
@@ -968,9 +1044,11 @@ def extract_events(
         t = _parse_time_near(text, m.end())
         start, end, all_day = _apply_time(day_dt, t)
         fuzzy = bool(m["approx"] or m["around"])
+        deadline = (m.start() >= subject_end) and _in_deadline_context(text, m.start())
+        extra = 0.06 + (0.24 if m.start() < subject_end else 0.0)
         _add_event(
             events, subject, text, m.start(), m.end(), start, end, all_day, m.group(0), now,
-            extra_confidence=0.06, fuzzy=fuzzy,
+            extra_confidence=extra, fuzzy=fuzzy, date_kind="deadline" if deadline else "",
         )
         consume(m.span())
 
@@ -983,9 +1061,11 @@ def extract_events(
         t = _parse_time_near(text, m.end())
         start, end, all_day = _apply_time(day_dt, t)
         fuzzy = bool(m["approx"])
+        deadline = (m.start() >= subject_end) and _in_deadline_context(text, m.start())
+        extra = 0.05 + (0.24 if m.start() < subject_end else 0.0)
         _add_event(
             events, subject, text, m.start(), m.end(), start, end, all_day, m.group(0), now,
-            extra_confidence=0.05, fuzzy=fuzzy,
+            extra_confidence=extra, fuzzy=fuzzy, date_kind="deadline" if deadline else "",
         )
         consume(m.span())
 
@@ -1077,6 +1157,8 @@ def extract_events(
 
     unique: list[ExtractedEvent] = []
     seen: set[tuple[str, str]] = set()
+    if any(not event.date_kind and not event.fuzzy for event in events):
+        events = [event for event in events if event.date_kind != "deadline"]
     for event in sorted(events, key=lambda e: (-e.confidence, e.start)):
         key = (event.start.isoformat(timespec="minutes"), event.title)
         if key in seen:
@@ -1268,6 +1350,157 @@ def extract_all(
     return extract_promo(
         subject, body, received_at, tz=tz, list_unsubscribe=list_unsubscribe, sender=sender
     )
+
+
+def combine_extracted_events(
+    primary: list[ExtractedEvent],
+    extra: list[ExtractedEvent],
+) -> list[ExtractedEvent]:
+    """Keep body-extracted events and add ICS/other events without dropping duplicates' location."""
+    out = list(primary or [])
+    seen = {(event.start.isoformat(timespec="minutes"), event.title.casefold()) for event in out}
+    for event in extra or []:
+        key = (event.start.isoformat(timespec="minutes"), event.title.casefold())
+        if key in seen:
+            for existing in out:
+                same = (
+                    existing.start.isoformat(timespec="minutes") == key[0]
+                    and existing.title.casefold() == key[1]
+                )
+                if not same:
+                    continue
+                if not existing.location and event.location:
+                    existing.location = event.location
+                if not existing.notes and event.notes:
+                    existing.notes = event.notes
+            continue
+        seen.add(key)
+        out.append(event)
+    return out
+
+
+_REMINDER_PREFIX = re.compile(
+    r"^(?:(?:re|fw|fwd|转发|更正|提醒|更新|补发)\s*[:：\-]?\s*|"
+    r"\((?:reminder|correction|update|updated)\)\s*[-:]?\s*)+",
+    re.I,
+)
+_ORIENT_HINT = re.compile(r"orientation|迎新|welcome week|o-week", re.I)
+
+
+def event_family_key(title: str, subject: str = "") -> str:
+    text = f"{title or ''} {subject or ''}".strip()
+    for _ in range(4):
+        stripped = _REMINDER_PREFIX.sub("", text).strip()
+        if stripped == text:
+            break
+        text = stripped
+    text = re.sub(r"\((?:reminder|correction|更正|提醒)\)", " ", text, flags=re.I)
+    text = _EN.sub(" ", text)
+    text = _EN_DM.sub(" ", text)
+    text = _CN_FULL.sub(" ", text)
+    text = _ISO.sub(" ", text)
+    folded = fold_search(text)
+    tokens = [tok for tok in re.findall(r"[a-z0-9]{2,}|[\u4e00-\u9fff]+", folded) if tok not in {"the", "and", "for", "of"}]
+    return " ".join(tokens)[:80]
+
+
+def _family_match(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    if left in right or right in left:
+        return min(len(left), len(right)) >= 12
+    return fuzzy_ratio(left, right) >= 0.78
+
+
+def _orientationish(item: dict) -> bool:
+    blob = f"{item.get('title') or ''} {item.get('subject') or ''}"
+    return bool(_ORIENT_HINT.search(blob))
+
+
+def _dates_close(left: str, right: str, days: int = 14) -> bool:
+    try:
+        a = datetime.fromisoformat(str(left).replace("Z", "+00:00"))
+        b = datetime.fromisoformat(str(right).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return abs((a - b).days) <= days
+
+
+def same_event_family(left: dict, right: dict) -> bool:
+    if (left.get("kind") or "event") != "event" or (right.get("kind") or "event") != "event":
+        return False
+    key_a = event_family_key(str(left.get("title") or ""), str(left.get("subject") or ""))
+    key_b = event_family_key(str(right.get("title") or ""), str(right.get("subject") or ""))
+    if _family_match(key_a, key_b):
+        return True
+    sender_a = fold_search(str(left.get("sender") or ""))
+    sender_b = fold_search(str(right.get("sender") or ""))
+    if sender_a and sender_a == sender_b and _orientationish(left) and _orientationish(right):
+        return _dates_close(str(left.get("start_at") or ""), str(right.get("start_at") or ""), days=21)
+    score_ab, _ = score_search_fields(key_a, key_b)
+    score_ba, _ = score_search_fields(key_b, key_a)
+    if max(score_ab, score_ba) >= 0.85 and _orientationish(left) and _orientationish(right):
+        return _dates_close(str(left.get("start_at") or ""), str(right.get("start_at") or ""), days=21)
+    return False
+
+
+def merge_related_events(items: list[dict]) -> list[dict]:
+    """Copy location/notes/date from a fuller sibling reminder/correction mail."""
+    events = [item for item in items if (item.get("kind") or "event") == "event"]
+    n = len(events)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if same_event_family(events[i], events[j]):
+                a, b = find(i), find(j)
+                if a != b:
+                    parent[b] = a
+    groups: dict[int, list[dict]] = {}
+    for index, item in enumerate(events):
+        groups.setdefault(find(index), []).append(item)
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        donor = max(
+            group,
+            key=lambda row: (
+                len(str(row.get("location") or "")),
+                len(str(row.get("notes") or "")),
+                float(row.get("confidence") or 0),
+            ),
+        )
+        dated = max(
+            group,
+            key=lambda row: (
+                1 if _EN.search(str(row.get("subject") or "") + " " + str(row.get("title") or "")) else 0,
+                float(row.get("confidence") or 0),
+                0 if row.get("fuzzy") else 1,
+            ),
+        )
+        for item in group:
+            if not str(item.get("location") or "").strip() and donor.get("location"):
+                item["location"] = donor["location"]
+            if not str(item.get("notes") or "").strip() and donor.get("notes"):
+                item["notes"] = donor["notes"]
+            blob = f"{item.get('title') or ''} {item.get('subject') or ''}"
+            if _REMINDER_PREFIX.search(str(item.get("title") or "").strip()) or re.search(
+                r"(?i)reminder|correction|更正|提醒", blob
+            ):
+                if dated.get("start_at") and item.get("start_at") != dated.get("start_at"):
+                    if _dates_close(str(item.get("start_at") or ""), str(dated.get("start_at") or ""), days=21):
+                        item["start_at"] = dated["start_at"]
+                        item["end_at"] = dated.get("end_at") or item.get("end_at")
+                        item["all_day"] = dated.get("all_day", item.get("all_day"))
+    return items
 
 
 _LATIN_TOKEN = re.compile(r"[a-z0-9']+", re.I)
