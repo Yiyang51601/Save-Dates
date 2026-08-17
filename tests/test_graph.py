@@ -29,7 +29,7 @@ def test_graph_message_extracts_chinese_datetime():
     assert "2026-08-21" in items[0]["start_at"]
 
 
-def test_graph_meeting_invite_is_skipped():
+def test_graph_meeting_invite_without_date_is_skipped():
     email_id, items = message_to_candidates(
         {
             "id": "invite-1",
@@ -42,6 +42,27 @@ def test_graph_meeting_invite_is_skipped():
     )
     assert email_id == "graph:invite-1"
     assert items == []
+
+
+def test_graph_meeting_invite_with_date_is_kept():
+    email_id, items = message_to_candidates(
+        {
+            "id": "invite-2",
+            "subject": "Pitt CS Forum",
+            "receivedDateTime": "2026-08-16T13:00:00Z",
+            "meetingMessageType": "meetingRequest",
+            "isDraft": False,
+            "body": {
+                "contentType": "text",
+                "content": "Join us on August 20, 2026 at 3:00 PM in Alumni Hall.",
+            },
+        },
+        now=NOW,
+    )
+    assert email_id == "graph:invite-2"
+    assert items
+    assert "2026-08-20" in items[0]["start_at"]
+    assert items[0]["title_zh"]
 
 
 def test_graph_auth_is_public_native_client():

@@ -55,6 +55,7 @@ hiddenimports = [
     "save_dates.outlook_detect",
     "save_dates.greet",
     "save_dates.i18n",
+    "save_dates.display_title",
     "msal",
 ]
 

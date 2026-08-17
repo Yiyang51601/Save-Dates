@@ -49,6 +49,13 @@ def test_home_and_static():
         assert "exit_demo" in js.text
         assert "全部邮箱" in js.text
         assert "All mailboxes" in js.text
+        assert "学校邮箱被拦 Graph" in js.text
+        assert "Needs admin approval" in js.text
+        assert "未找到该邮箱，请在经典 Outlook 添加并保持运行" in js.text
+        assert "cardTitle" in js.text
+        assert "title_zh" in js.text
+        assert "currentMailbox = \"\"" in js.text
+        assert "mailboxHint" in home.text
         assert "讲座通知" not in js.text
         assert "导师往来" not in js.text
         assert "advisor threads" not in js.text
@@ -67,7 +74,9 @@ def test_status_and_demo_review_flow():
         assert "timezone" in body
         assert "greeting" in body
         assert "mailboxes" in body
+        assert "unread_mailboxes" in body
         assert isinstance(body["mailboxes"], list)
+        assert isinstance(body["unread_mailboxes"], list)
         assert body["greeting"]
 
         scan = client.post("/api/scan", json={"demo": True})
@@ -79,6 +88,7 @@ def test_status_and_demo_review_flow():
         listed = client.get("/api/candidates?status=pending")
         assert listed.status_code == 200
         assert isinstance(listed.json()["mailboxes"], list)
+        assert isinstance(listed.json().get("unread_mailboxes"), list)
         items = listed.json()["items"]
         assert items
         first = items[0]
@@ -108,6 +118,8 @@ def test_language_setting_and_demo_cannot_open_mail():
         assert scan.status_code == 200
         item = client.get("/api/candidates?status=pending").json()["items"][0]
         assert item["can_open_mail"] is False
+        assert item.get("title_zh")
+        assert any("\u4e00" <= ch <= "\u9fff" for ch in item["title_zh"])
         opened = client.post(f"/api/candidates/{item['id']}/open-mail")
         assert opened.status_code == 400
         assert opened.json()["detail"] == "mail_is_demo"
@@ -387,7 +399,258 @@ def test_scan_inbox_keeps_all_store_mailboxes_when_email_cap_hits():
     )
     result = scan_inbox_with_namespace(ns, days=14, max_emails=10)
     assert result["mailboxes"] == ["old@x.com", "new@x.com"]
-    assert result["scanned"] == 10
+    assert result["scanned"] == 5
+    assert result["unread_mailboxes"] == []
+
+
+def test_list_mailboxes_includes_display_name_and_unread_accounts():
+    from save_dates.outlook_client import list_mailbox_report, list_mailboxes
+
+    class ComCollection(list):
+        @property
+        def Count(self):
+            return len(self)
+
+        def Item(self, index):
+            return self[index - 1]
+
+    class Store:
+        def __init__(self, sid, name, inbox=True):
+            self.StoreID = sid
+            self.DisplayName = name
+            self.ExchangeStoreType = 2
+            self._inbox = object() if inbox else None
+
+        def GetDefaultFolder(self, _kind):
+            if self._inbox is None:
+                raise RuntimeError("no inbox")
+            return self._inbox
+
+    class BrokenStore:
+        StoreID = "broken"
+        DisplayName = "Pitt"
+        ExchangeStoreType = 0
+
+        def GetDefaultFolder(self, _kind):
+            raise RuntimeError("fail")
+
+        def GetRootFolder(self):
+            raise RuntimeError("fail")
+
+    class Account:
+        def __init__(self, store, smtp):
+            self.DeliveryStore = store
+            self.SmtpAddress = smtp
+            self.DisplayName = smtp
+
+    class Namespace:
+        def __init__(self, stores, accounts):
+            self.Stores = stores
+            self.Accounts = accounts
+
+    pitt_store = Store("pitt", "yic327@pitt.edu")
+    personal = Store("p1", "Personal")
+    names = list_mailboxes(
+        Namespace(
+            ComCollection([personal, pitt_store]),
+            ComCollection([Account(personal, "yuan@personal.com")]),
+        )
+    )
+    assert names == ["yuan@personal.com", "yic327@pitt.edu"]
+
+    report = list_mailbox_report(
+        Namespace(
+            ComCollection([personal]),
+            ComCollection(
+                [Account(personal, "yuan@personal.com"), Account(BrokenStore(), "yic327@pitt.edu")]
+            ),
+        )
+    )
+    assert "yuan@personal.com" in report["mailboxes"]
+    assert "yic327@pitt.edu" in report["mailboxes"]
+    assert report["unread_mailboxes"] == ["yic327@pitt.edu"]
+
+
+def test_inbox_found_via_root_folder_when_default_fails():
+    from save_dates.outlook_client import list_mailboxes
+
+    class Folder:
+        def __init__(self, name):
+            self.Name = name
+            self.DefaultItemType = 0
+
+    class Root:
+        def __init__(self, folders):
+            self.Folders = folders
+
+    class Store:
+        StoreID = "imap-pitt"
+        DisplayName = "yic327@pitt.edu"
+        ExchangeStoreType = 2
+
+        def GetDefaultFolder(self, _kind):
+            raise RuntimeError("IMAP default missing")
+
+        def GetRootFolder(self):
+            return Root([Folder("Inbox")])
+
+    class Namespace:
+        Stores = [Store()]
+        Accounts = []
+
+    assert list_mailboxes(Namespace()) == ["yic327@pitt.edu"]
+
+
+def test_scan_fair_share_reads_later_store():
+    from datetime import datetime, timedelta, timezone
+
+    from save_dates.outlook_client import scan_inbox_with_namespace
+
+    now = datetime.now(timezone.utc)
+    future = now + timedelta(days=10)
+    date_text = future.strftime("%Y-%m-%d")
+
+    class PropertyAccessor:
+        @staticmethod
+        def GetProperty(_name):
+            raise RuntimeError("no")
+
+    class Mail:
+        def __init__(self, entry_id, subject, body, store_id, mailbox):
+            self.Class = 43
+            self.MessageClass = "IPM.Note"
+            self.Subject = subject
+            self.SenderName = "A"
+            self.SenderEmailAddress = "a@x.com"
+            self.EntryID = entry_id
+            self.Body = body
+            self.ReceivedTime = now
+            self.PropertyAccessor = PropertyAccessor
+            self.Parent = type("Parent", (), {"Store": type("Store", (), {"StoreID": store_id, "DisplayName": mailbox})()})()
+
+    class Items(list):
+        def Sort(self, *_args, **_kwargs):
+            return None
+
+    class Inbox:
+        def __init__(self, mails):
+            self.Items = Items(mails)
+
+    class Store:
+        def __init__(self, sid, inbox, name):
+            self.StoreID = sid
+            self.DisplayName = name
+            self._inbox = inbox
+
+        def GetDefaultFolder(self, _kind):
+            return self._inbox
+
+    class Account:
+        def __init__(self, store, smtp):
+            self.DeliveryStore = store
+            self.SmtpAddress = smtp
+            self.DisplayName = smtp
+
+    class Namespace:
+        def __init__(self, stores, accounts):
+            self.Stores = stores
+            self.Accounts = accounts
+            self.CurrentUser = type("User", (), {"Name": "Yuan"})()
+
+    personal_mails = [
+        Mail(f"p-{i}", "hello", "", "personal", "yuan@personal.com") for i in range(30)
+    ]
+    pitt_mail = Mail(
+        "pitt-1",
+        "Pitt CS Forum",
+        "Join us on " + date_text + " at 3:00 PM in Alumni Hall.",
+        "pitt",
+        "yic327@pitt.edu",
+    )
+    personal = Store("personal", Inbox(personal_mails), "Personal")
+    pitt = Store("pitt", Inbox([pitt_mail]), "Pitt")
+    ns = Namespace(
+        [personal, pitt],
+        [Account(personal, "yuan@personal.com"), Account(pitt, "yic327@pitt.edu")],
+    )
+    found = []
+    result = scan_inbox_with_namespace(ns, days=14, max_emails=10, sink=found.extend)
+    assert "yic327@pitt.edu" in result["mailboxes"]
+    assert result["scanned"] == 6
+    assert any(row.get("mailbox") == "yic327@pitt.edu" for row in found)
+
+
+def test_meeting_invite_with_date_becomes_candidate():
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    from save_dates.outlook_client import mail_to_candidates
+
+    now = datetime(2026, 8, 16, 15, 6, tzinfo=ZoneInfo("America/New_York"))
+
+    class Invite:
+        Class = 53
+        MessageClass = "IPM.Schedule.Meeting.Request"
+        Subject = "Pitt lecture"
+        SenderName = "CS"
+        SenderEmailAddress = "cs@pitt.edu"
+        EntryID = "inv-1"
+        Body = "Join us on August 20, 2026 at 3:00 PM in Alumni Hall."
+        ReceivedTime = datetime(2026, 8, 16, 13, 0, tzinfo=timezone.utc)
+        Start = datetime(2026, 8, 20, 15, 0)
+        End = datetime(2026, 8, 20, 16, 0)
+        AllDayEvent = False
+
+        class PropertyAccessor:
+            @staticmethod
+            def GetProperty(_name):
+                raise RuntimeError("no")
+
+        class Parent:
+            class Store:
+                StoreID = "pitt"
+                DisplayName = "yic327@pitt.edu"
+
+    email_id, items = mail_to_candidates(Invite(), now=now)
+    assert email_id == "inv-1"
+    assert items
+    assert items[0]["kind"] == "event"
+    assert "2026-08-20" in items[0]["start_at"]
+    assert items[0]["title_zh"]
+
+
+def test_regular_mail_with_meeting_status_is_not_dropped():
+    from datetime import datetime, timezone
+    from zoneinfo import ZoneInfo
+
+    from save_dates.outlook_client import mail_to_candidates
+
+    now = datetime(2026, 8, 16, 15, 6, tzinfo=ZoneInfo("America/New_York"))
+
+    class Mail:
+        Class = 43
+        MessageClass = "IPM.Note"
+        MeetingStatus = 1
+        Subject = "Eventbrite: campus forum"
+        SenderName = "Eventbrite"
+        SenderEmailAddress = "e@eventbrite.com"
+        EntryID = "ev-1"
+        Body = "Join us on August 20, 2026 at 3:00 PM."
+        ReceivedTime = datetime(2026, 8, 16, 13, 0, tzinfo=timezone.utc)
+
+        class PropertyAccessor:
+            @staticmethod
+            def GetProperty(_name):
+                raise RuntimeError("no")
+
+        class Parent:
+            class Store:
+                StoreID = "pitt"
+                DisplayName = "yic327@pitt.edu"
+
+    email_id, items = mail_to_candidates(Mail(), now=now)
+    assert email_id == "ev-1"
+    assert items
 
 
 def test_demo_promo_can_be_cleared_locally():

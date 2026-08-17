@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from save_dates.config import DATA_DIR, DB_PATH, SETTINGS_PATH
+from save_dates.display_title import attach_display_titles
 from save_dates.i18n import system_ui_lang
 
 _lock = threading.Lock()
@@ -146,7 +147,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     email_id = str(item.get("email_id") or "")
     mail_url = str(item.get("mail_url") or "")
     item["can_open_mail"] = (bool(email_id) and not email_id.startswith("demo-")) or bool(mail_url)
-    return item
+    return attach_display_titles(item)
 
 
 def list_searchable(limit: int = 200) -> list[dict[str, Any]]:

@@ -16,6 +16,7 @@ from save_dates.config import (
     REMINDER_MINUTES_ALL_DAY,
     REMINDER_MINUTES_TIMED,
 )
+from save_dates.display_title import attach_display_titles
 from save_dates.extract import (
     extract_all,
     html_to_text,
@@ -51,7 +52,7 @@ def message_to_candidates(
     email_id = f"{GRAPH_ID_PREFIX}{msg.get('id') or ''}"
     if not msg.get("id"):
         return "", []
-    if _is_meeting_invite(msg) or msg.get("isDraft"):
+    if msg.get("isDraft"):
         return email_id, []
 
     received = _parse_graph_dt(msg.get("receivedDateTime"))
@@ -66,26 +67,28 @@ def message_to_candidates(
     web_link = str(msg.get("webLink") or "")
     internet_id = str(msg.get("internetMessageId") or "")
     candidates = [
-        {
-            "email_id": email_id,
-            "internet_id": internet_id,
-            "store_id": "",
-            "mail_url": web_link,
-            "mailbox": mailbox,
-            "subject": subject,
-            "sender": sender,
-            "received_at": received.isoformat(timespec="seconds"),
-            "title": event.title,
-            "start_at": event.start.isoformat(timespec="minutes"),
-            "end_at": event.end.isoformat(timespec="minutes"),
-            "all_day": event.all_day,
-            "snippet": event.snippet,
-            "matched_text": event.matched_text,
-            "confidence": event.confidence,
-            "fuzzy": event.fuzzy,
-            "kind": event.kind,
-            "task_type": event.task_type,
-        }
+        attach_display_titles(
+            {
+                "email_id": email_id,
+                "internet_id": internet_id,
+                "store_id": "",
+                "mail_url": web_link,
+                "mailbox": mailbox,
+                "subject": subject,
+                "sender": sender,
+                "received_at": received.isoformat(timespec="seconds"),
+                "title": event.title,
+                "start_at": event.start.isoformat(timespec="minutes"),
+                "end_at": event.end.isoformat(timespec="minutes"),
+                "all_day": event.all_day,
+                "snippet": event.snippet,
+                "matched_text": event.matched_text,
+                "confidence": event.confidence,
+                "fuzzy": event.fuzzy,
+                "kind": event.kind,
+                "task_type": event.task_type,
+            }
+        )
         for event in events
     ]
     return email_id, candidates
@@ -115,11 +118,9 @@ def scan_inbox(
             if scanned >= max_emails:
                 break
             email_id = f"{GRAPH_ID_PREFIX}{msg.get('id') or ''}"
-            if _is_meeting_invite(msg):
-                skipped_invite += 1
-                continue
             if msg.get("isDraft"):
                 continue
+            is_invite = _is_meeting_invite(msg)
             scanned += 1
             if not msg.get("id"):
                 continue
@@ -127,6 +128,10 @@ def scan_inbox(
                 skipped_processed += 1
                 continue
             _, candidates = message_to_candidates(msg, now=now, mailbox=account)
+            if is_invite and not candidates:
+                skipped_invite += 1
+                scanned -= 1
+                continue
             found += len(candidates)
             if candidates and sink:
                 sink(candidates)
@@ -140,6 +145,7 @@ def scan_inbox(
         "found": found,
         "account": account,
         "mailboxes": [account] if account else [],
+        "unread_mailboxes": [],
     }
 
 
@@ -174,38 +180,40 @@ def _search_hits_from_message(
             row["extracted"] = True
             row["status"] = ""
             row["can_open_mail"] = True
-            hits.append(row)
+            hits.append(attach_display_titles(row))
         return hits
     received = _parse_graph_dt(msg.get("receivedDateTime"))
     received_at = (received or now).isoformat(timespec="seconds")
     email_id = f"{GRAPH_ID_PREFIX}{msg.get('id') or ''}"
     return [
-        {
-            "email_id": email_id,
-            "internet_id": str(msg.get("internetMessageId") or ""),
-            "store_id": "",
-            "mail_url": str(msg.get("webLink") or ""),
-            "mailbox": mailbox,
-            "subject": subject,
-            "sender": sender,
-            "received_at": received_at,
-            "title": subject[:80],
-            "start_at": received_at,
-            "end_at": received_at,
-            "all_day": False,
-            "snippet": snippet_around_query(body or subject, query, highlight),
-            "matched_text": highlight,
-            "confidence": round(min(0.7, 0.4 + score * 0.3), 2),
-            "fuzzy": True,
-            "kind": "event",
-            "task_type": "",
-            "score": round(score, 3),
-            "highlight": highlight,
-            "source": "mail",
-            "extracted": False,
-            "status": "",
-            "can_open_mail": bool(msg.get("id") or msg.get("webLink")),
-        }
+        attach_display_titles(
+            {
+                "email_id": email_id,
+                "internet_id": str(msg.get("internetMessageId") or ""),
+                "store_id": "",
+                "mail_url": str(msg.get("webLink") or ""),
+                "mailbox": mailbox,
+                "subject": subject,
+                "sender": sender,
+                "received_at": received_at,
+                "title": subject[:80],
+                "start_at": received_at,
+                "end_at": received_at,
+                "all_day": False,
+                "snippet": snippet_around_query(body or subject, query, highlight),
+                "matched_text": highlight,
+                "confidence": round(min(0.7, 0.4 + score * 0.3), 2),
+                "fuzzy": True,
+                "kind": "event",
+                "task_type": "",
+                "score": round(score, 3),
+                "highlight": highlight,
+                "source": "mail",
+                "extracted": False,
+                "status": "",
+                "can_open_mail": bool(msg.get("id") or msg.get("webLink")),
+            }
+        )
     ]
 
 
@@ -231,7 +239,7 @@ def search_recent_mail(
         for msg in payload.get("value") or []:
             if scanned >= max_emails:
                 break
-            if _is_meeting_invite(msg) or msg.get("isDraft"):
+            if msg.get("isDraft"):
                 continue
             scanned += 1
             hits.extend(_search_hits_from_message(query, msg, now, account))

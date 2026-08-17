@@ -18,11 +18,13 @@ from save_dates.graph_runtime import GraphRuntime
 from save_dates.outlook_client import (
     OL_FOLDER_INBOX,
     OL_FOLDER_JUNK,
+    _get_item,
+    _iter_inboxes,
     create_calendar_event_with_app,
     create_task_with_app,
     delete_item_with_namespace,
     display_mail,
-    list_mailboxes,
+    list_mailbox_report,
     mail_to_candidates,
     move_mail_with_namespace,
     scan_inbox_with_namespace,
@@ -43,6 +45,7 @@ class WatchSnapshot:
     classic_running: bool = False
     new_outlook_running: bool = False
     mailboxes: list[str] | None = None
+    unread_mailboxes: list[str] | None = None
 
 
 class _AppEvents:
@@ -82,13 +85,13 @@ class OutlookRuntime:
         self._watching = False
         self._account = ""
         self._mailboxes: list[str] = []
+        self._unread_mailboxes: list[str] = []
         self._error = "outlook_connecting"
         self._recent_ids: deque[str] = deque(maxlen=WATCH_RECENT_IDS)
         self._app = None
         self._ns = None
         self._app_events = None
-        self._inbox_events = None
-        self._inbox_items = None
+        self._inbox_hooks: list[Any] = []
         self._retry_at = 0.0
 
     def start(self) -> None:
@@ -116,6 +119,7 @@ class OutlookRuntime:
             generation=self._generation,
             last_added=self._last_added,
             mailboxes=list(self._mailboxes),
+            unread_mailboxes=list(self._unread_mailboxes),
         )
 
     def mailboxes(self) -> list[str]:
@@ -160,8 +164,10 @@ class OutlookRuntime:
                 mark_seen=db.mark_seen,
             )
             self._mailboxes = list(result.get("mailboxes") or [])
+            self._unread_mailboxes = list(result.get("unread_mailboxes") or [])
             result["added"] = added
             result["mailboxes"] = list(self._mailboxes)
+            result["unread_mailboxes"] = list(self._unread_mailboxes)
             if added:
                 self.notify(added)
             return result
@@ -238,7 +244,7 @@ class OutlookRuntime:
                 continue
             item = None
             try:
-                item = self._ns.GetItemFromID(entry_id)
+                item = _get_item(self._ns, entry_id)
                 self.handle_item(item)
             except Exception:
                 continue
@@ -314,15 +320,25 @@ class OutlookRuntime:
             raise RuntimeError("outlook_not_running") from exc
         ns = app.GetNamespace("MAPI")
         account = str(ns.CurrentUser.Name)
-        inbox = ns.GetDefaultFolder(OL_FOLDER_INBOX)
-        items = inbox.Items
+        report = list_mailbox_report(ns)
         self._app = app
         self._ns = ns
-        self._inbox_items = items
         self._app_events = win32com.client.DispatchWithEvents(app, _AppEvents)
-        self._inbox_events = win32com.client.DispatchWithEvents(items, _InboxEvents)
+        self._inbox_hooks = []
+        for inbox, _mailbox, _sid in _iter_inboxes(ns):
+            try:
+                items = inbox.Items
+                events = win32com.client.DispatchWithEvents(items, _InboxEvents)
+                self._inbox_hooks.append((items, events))
+            except Exception:
+                continue
+        if not self._inbox_hooks:
+            inbox = ns.GetDefaultFolder(OL_FOLDER_INBOX)
+            items = inbox.Items
+            self._inbox_hooks.append((items, win32com.client.DispatchWithEvents(items, _InboxEvents)))
         self._account = account
-        self._mailboxes = list_mailboxes(ns)
+        self._mailboxes = list(report["mailboxes"])
+        self._unread_mailboxes = list(report["unread_mailboxes"])
         self._connected = True
         self._watching = True
         self._error = ""
@@ -330,8 +346,7 @@ class OutlookRuntime:
 
     def _release_outlook(self) -> None:
         self._app_events = None
-        self._inbox_events = None
-        self._inbox_items = None
+        self._inbox_hooks = []
         self._ns = None
         self._app = None
         self._watching = False
@@ -410,7 +425,8 @@ class MailboxHub:
                 graph_logged_in=graph["logged_in"],
                 classic_running=classic_running,
                 new_outlook_running=new_running,
-                mailboxes=self.classic.mailboxes(),
+                mailboxes=list(classic.mailboxes or []),
+                unread_mailboxes=list(classic.unread_mailboxes or []),
             )
         if active == "graph":
             return WatchSnapshot(
@@ -425,6 +441,7 @@ class MailboxHub:
                 classic_running=classic_running,
                 new_outlook_running=new_running,
                 mailboxes=self.graph.mailboxes(),
+                unread_mailboxes=[],
             )
         error = _disconnected_error(
             backend_pref,
@@ -446,6 +463,7 @@ class MailboxHub:
             classic_running=classic_running,
             new_outlook_running=new_running,
             mailboxes=_unique_mailboxes(self.classic.mailboxes() + self.graph.mailboxes()),
+            unread_mailboxes=list(classic.unread_mailboxes or []),
         )
 
     def mailboxes(self) -> list[str]:

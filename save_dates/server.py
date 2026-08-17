@@ -128,6 +128,7 @@ def _snap_payload(snap, extra: dict | None = None) -> dict:
         "counts": db.counts(),
         "settings": settings,
         "mailboxes": list(snap.mailboxes or []),
+        "unread_mailboxes": list(snap.unread_mailboxes or []),
     }
     if extra:
         payload.update(extra)
@@ -390,6 +391,7 @@ def api_scan(req: ScanRequest) -> dict:
             "removed": removed,
             "counts": db.counts(),
             "mailboxes": list(watcher.snapshot().mailboxes or []),
+            "unread_mailboxes": list(watcher.snapshot().unread_mailboxes or []),
         }
 
     if req.demo:
@@ -405,6 +407,7 @@ def api_scan(req: ScanRequest) -> dict:
             "added": added,
             "counts": db.counts(),
             "mailboxes": list(watcher.snapshot().mailboxes or []),
+            "unread_mailboxes": list(watcher.snapshot().unread_mailboxes or []),
         }
 
     snap = watcher.snapshot()
@@ -431,6 +434,7 @@ def api_scan(req: ScanRequest) -> dict:
         "added": result["added"],
         "account": result.get("account", ""),
         "mailboxes": list(result.get("mailboxes") or snap.mailboxes or []),
+        "unread_mailboxes": list(result.get("unread_mailboxes") or snap.unread_mailboxes or []),
         "counts": db.counts(),
     }
 
@@ -445,6 +449,7 @@ def api_list(status: str = "pending") -> dict:
         "items": items,
         "counts": db.counts(),
         "mailboxes": list(watcher.snapshot().mailboxes or []),
+        "unread_mailboxes": list(watcher.snapshot().unread_mailboxes or []),
     }
 
 

@@ -19,9 +19,9 @@ const STRINGS = {
     connectPersistAlways: "记住选择",
     connectPersistAlwaysHelp: "写入设置。下次启动直接用，不再弹出。",
     pickClassicTitle: "经典 Outlook",
-    pickClassicHelp: "打开 outlook.exe 并保持运行。软件通过 COM 读取邮件。",
+    pickClassicHelp: "打开 outlook.exe 并保持运行。软件通过 COM 读取邮件。学校邮箱请在经典 Outlook 添加该账号。",
     pickGraphTitle: "新 Outlook / 登录 Microsoft",
-    pickGraphHelp: "用 Microsoft 账号登录。不用填写应用 ID。",
+    pickGraphHelp: "用 Microsoft 账号登录。不用填写应用 ID。学校邮箱被拦 Graph（Needs admin approval）时必须用经典 Outlook 登录该账号。",
     connectPickerLater: "稍后再说",
     pickingClassic: "已选择经典 Outlook。请打开 outlook.exe 并保持运行。",
     offlinePickHint: "未连接。点击此处选择经典 Outlook，或登录 Microsoft。",
@@ -71,6 +71,9 @@ const STRINGS = {
     lanePromo: "广告",
     mailboxAll: "全部邮箱",
     mailboxLabel: "邮箱",
+    schoolMailboxHint: "学校邮箱被拦 Graph 时必须用经典 Outlook 登录该账号。",
+    missingMailbox: "未找到该邮箱，请在经典 Outlook 添加并保持运行。 Mailbox not found — add it in Classic Outlook and leave Outlook running.",
+    originalTitle: "原标题：{title}",
     promoKind: "广告",
     acceptPromo: "清掉",
     addedPromo: "已移到 Outlook 垃圾箱。",
@@ -151,9 +154,9 @@ const STRINGS = {
     connectPersistAlways: "Always",
     connectPersistAlwaysHelp: "Save this choice. We won’t ask again.",
     pickClassicTitle: "Classic Outlook",
-    pickClassicHelp: "Open outlook.exe and leave it running. Save Dates talks to it over COM.",
+    pickClassicHelp: "Open outlook.exe and leave it running. Save Dates talks to it over COM. Add school mailboxes in Classic Outlook.",
     pickGraphTitle: "New Outlook / Sign in to Microsoft",
-    pickGraphHelp: "Sign in with your Microsoft account. You do not type an Application ID.",
+    pickGraphHelp: "Sign in with your Microsoft account. You do not type an Application ID. If your school blocks Graph (Needs admin approval), sign that account into Classic Outlook.",
     connectPickerLater: "Not now",
     pickingClassic: "Classic Outlook selected. Open outlook.exe and leave it running.",
     offlinePickHint: "Not connected. Click here to choose Classic Outlook or Microsoft sign-in.",
@@ -203,6 +206,9 @@ const STRINGS = {
     lanePromo: "Ads",
     mailboxAll: "All mailboxes",
     mailboxLabel: "Mailbox",
+    schoolMailboxHint: "If your school blocks Graph (Needs admin approval), sign that account into Classic Outlook.",
+    missingMailbox: "Mailbox not found — add it in Classic Outlook and leave Outlook running. 未找到该邮箱，请在经典 Outlook 添加并保持运行。",
+    originalTitle: "Original: {title}",
     promoKind: "Ad",
     acceptPromo: "Junk",
     addedPromo: "Moved to Junk Email.",
@@ -283,6 +289,7 @@ let lastItems = [];
 let lastStatus = null;
 let currentLane = "event";
 let currentMailbox = "";
+let liveUnreadMailboxes = [];
 let liveMailboxes = [];
 let demoActive = false;
 let lastUndoIds = [];
@@ -509,6 +516,8 @@ function applyStatus(s) {
     liveMailboxes = s.mailboxes.filter(Boolean);
     updateMailboxSelect(lastItems);
   }
+  if (Array.isArray(s.unread_mailboxes)) rememberUnread(s.unread_mailboxes);
+  updateMailboxHint(s);
   const bundled = Boolean(s.settings?.has_bundled_graph_client);
   const savedId = Boolean(s.settings?.graph_client_id);
   const needId = !bundled && !savedId;
@@ -642,6 +651,40 @@ function taskTypeLabel(item) {
   return t("taskKind");
 }
 
+function cardTitle(item) {
+  if (lang === "zh") return item.title_zh || item.title || "";
+  return item.title || "";
+}
+
+function originalTitleHtml(item) {
+  if (lang !== "zh") return "";
+  const shown = cardTitle(item);
+  const orig = String(item.subject || item.title || "").trim();
+  if (!orig || orig === shown) return "";
+  return `<p class="orig-title">${escapeHtml(t("originalTitle", { title: orig }))}</p>`;
+}
+
+function rememberUnread(list) {
+  if (!Array.isArray(list)) return;
+  liveUnreadMailboxes = list.filter(Boolean);
+}
+
+function mailboxHintText(status) {
+  const s = status || lastStatus || {};
+  const unread = (s.unread_mailboxes || liveUnreadMailboxes || []).filter(Boolean);
+  if (unread.length) return t("missingMailbox");
+  if (s.new_outlook_running || s.backend === "graph") return t("schoolMailboxHint");
+  return "";
+}
+
+function updateMailboxHint(status) {
+  const el = $("mailboxHint");
+  if (!el) return;
+  const text = mailboxHintText(status);
+  el.textContent = text;
+  el.classList.toggle("hidden", !text);
+}
+
 function isDemoItem(item) {
   return String(item?.email_id || "").startsWith("demo-");
 }
@@ -708,6 +751,7 @@ function updateMailboxSelect(items) {
   if (!names.length) {
     host.classList.add("hidden");
     sel.innerHTML = "";
+    updateMailboxHint(lastStatus);
     return;
   }
   host.classList.remove("hidden");
@@ -718,6 +762,7 @@ function updateMailboxSelect(items) {
   }
   sel.innerHTML = opts.join("");
   sel.value = currentMailbox;
+  updateMailboxHint(lastStatus);
 }
 
 function emptyHintKey() {
@@ -795,12 +840,13 @@ function render(items) {
           <div class="meta">${escapeHtml(fmtTime(start, item.all_day))}</div>
         </div>`;
     }
+    const titleText = cardTitle(item);
     const fields = (task || promo)
       ? `<div class="fields">
-          <input class="title" data-field="title" value="${escapeHtml(item.title)}" />
+          <input class="title" data-field="title" value="${escapeHtml(titleText)}" />
         </div>`
       : `<div class="fields">
-          <input class="title" data-field="title" value="${escapeHtml(item.title)}" />
+          <input class="title" data-field="title" value="${escapeHtml(titleText)}" />
           <input data-field="when" type="${item.all_day ? "date" : "datetime-local"}" value="${item.all_day ? toDateInput(start) : toLocalInput(start)}" />
           <label class="check"><input data-field="all_day" type="checkbox" ${item.all_day ? "checked" : ""} /> ${t("allDay")}</label>
         </div>`;
@@ -809,7 +855,8 @@ function render(items) {
       <input class="pick" type="checkbox" value="${item.id}" />
       ${dateBlock}
       <div class="body">
-        <h2>${escapeHtml(item.title)}${approx}</h2>
+        <h2>${escapeHtml(titleText)}${approx}</h2>
+        ${originalTitleHtml(item)}
         <p class="who">${mailbox}${escapeHtml(t("fromMail", {
           sender: item.sender,
           subject: item.subject,
@@ -870,7 +917,7 @@ function renderSearch(items, query, meta = {}) {
     const openDisabled = item.can_open_mail ? "" : "disabled";
     return `<div class="search-hit" data-search-index="${index}" role="button" tabindex="0">
       <div class="hit-top">
-        <div class="hit-title">${escapeHtml(item.title || item.subject || "")}</div>
+        <div class="hit-title">${escapeHtml(lang === "zh" ? (item.title_zh || item.title || item.subject || "") : (item.title || item.subject || ""))}</div>
         <div class="hit-when">${escapeHtml(when)}</div>
       </div>
       <div class="hit-meta"><span class="hit-tag ${sourceClass(item)}">${escapeHtml(sourceLabel(item))}</span>${escapeHtml(t("fromMail", {
@@ -989,6 +1036,7 @@ async function loadList() {
   if (Array.isArray(data.mailboxes)) {
     liveMailboxes = data.mailboxes.filter(Boolean);
   }
+  rememberUnread(data.unread_mailboxes);
   const items = data.items || [];
   if (!demoActive && items.some(isDemoItem)) demoActive = true;
   updateDemoButton();
@@ -1041,7 +1089,9 @@ $("scanBtn").addEventListener("click", async () => {
       skipped: data.skipped_invite,
     }));
     demoActive = false;
+    currentMailbox = "";
     if (Array.isArray(data.mailboxes)) liveMailboxes = data.mailboxes.filter(Boolean);
+    rememberUnread(data.unread_mailboxes);
     updateDemoButton();
     await loadList();
     await refreshStatus();

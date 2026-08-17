@@ -497,6 +497,17 @@ button:disabled { opacity: 0.5; cursor: wait; }
   font: inherit;
   font-size: 12px;
 }
+.mailbox-hint {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.orig-title {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
 button.ghost.on {
   background: var(--ink);
   color: #f4efe6;
