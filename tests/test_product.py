@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from fastapi.testclient import TestClient
 
 from save_dates.server import app
@@ -13,6 +15,8 @@ def test_home_and_static():
         assert "connectPicker" in home.text
         assert "pickClassic" in home.text
         assert "pickGraph" in home.text
+        assert "connectPersistOnce" in home.text
+        assert "connectPersistAlways" in home.text
         assert "进阶 · 仅新 Outlook" in home.text
         assert "经典 Outlook" in home.text
         assert "mailSearch" in home.text
@@ -20,12 +24,17 @@ def test_home_and_static():
         css = client.get("/static/styles.css")
         assert css.status_code == 200
         assert "empty-hint-out" in css.text
+        assert "connect-persist" in css.text
         js = client.get("/static/app.js")
         assert js.status_code == 200
         assert "搜邮件里的活动" in js.text
         assert "Search mail for events" in js.text
         assert "选择邮箱连接方式" in js.text
         assert "How do you want to connect?" in js.text
+        assert "仅此次" in js.text
+        assert "This time only" in js.text
+        assert "记住选择" in js.text
+        assert "persist_backend" in js.text
         assert "You do not type an Application ID" in js.text
         assert "connectPickerAutoShown" in js.text
         assert "detectSystemLang" in js.text
@@ -102,6 +111,64 @@ def test_backend_setting_roundtrip():
         assert settings["backend"] == "graph"
         assert settings["has_bundled_graph_client"] is True
         client.put("/api/settings", json={"backend": "auto"})
+
+
+def test_session_backend_is_not_written_to_disk(tmp_path, monkeypatch):
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setattr("save_dates.db.SETTINGS_PATH", settings_path)
+    monkeypatch.setattr("save_dates.db.DATA_DIR", tmp_path)
+    from save_dates import db
+
+    db.clear_session_backend()
+    db.save_settings({"lang": "zh", "graph_client_id": "keep-me"})
+    try:
+        db.set_session_backend("classic")
+        settings = db.get_settings()
+        assert settings["backend"] == "classic"
+        assert settings["lang"] == "zh"
+        assert settings["graph_client_id"] == "keep-me"
+        raw = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert raw["backend"] == "auto"
+        assert raw["lang"] == "zh"
+        assert raw["graph_client_id"] == "keep-me"
+        db.clear_session_backend()
+        assert db.get_settings()["backend"] == "auto"
+    finally:
+        db.clear_session_backend()
+
+
+def test_persist_backend_false_is_session_only(tmp_path, monkeypatch):
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setattr("save_dates.db.SETTINGS_PATH", settings_path)
+    monkeypatch.setattr("save_dates.db.DATA_DIR", tmp_path)
+    from save_dates import db
+
+    db.clear_session_backend()
+    try:
+        with TestClient(app) as client:
+            client.put("/api/settings", json={"lang": "en", "graph_client_id": "keep-id"})
+            saved = client.put("/api/settings", json={"backend": "classic", "persist_backend": False})
+            assert saved.status_code == 200
+            assert saved.json()["backend"] == "classic"
+            assert client.get("/api/settings").json()["backend"] == "classic"
+            raw = json.loads(settings_path.read_text(encoding="utf-8"))
+            assert raw.get("backend") == "auto"
+            assert raw.get("lang") == "en"
+            assert raw.get("graph_client_id") == "keep-id"
+            once_graph = client.put("/api/settings", json={"backend": "graph", "persist_backend": False})
+            assert once_graph.json()["backend"] == "graph"
+            raw = json.loads(settings_path.read_text(encoding="utf-8"))
+            assert raw.get("backend") == "auto"
+            assert raw.get("graph_client_id") == "keep-id"
+            always = client.put("/api/settings", json={"backend": "graph", "persist_backend": True})
+            assert always.json()["backend"] == "graph"
+            raw = json.loads(settings_path.read_text(encoding="utf-8"))
+            assert raw["backend"] == "graph"
+            assert raw["lang"] == "en"
+            assert raw["graph_client_id"] == "keep-id"
+            client.put("/api/settings", json={"backend": "auto"})
+    finally:
+        db.clear_session_backend()
 
 
 def test_auto_backend_asks_user_to_choose_connection():

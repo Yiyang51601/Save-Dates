@@ -362,6 +362,53 @@ body.modal-open { overflow: hidden; }
   font-size: 14px;
   line-height: 1.45;
 }
+.connect-persist {
+  margin: 14px 0 0;
+}
+.connect-persist-label {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.connect-persist-opts {
+  display: flex;
+  gap: 8px;
+}
+.connect-persist-opt {
+  flex: 1;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: white;
+  cursor: pointer;
+  color: inherit;
+}
+.connect-persist-opt:has(input:checked) {
+  border-color: var(--green);
+  background: #f4f8f4;
+}
+.connect-persist-opt input {
+  margin-top: 3px;
+  accent-color: var(--green);
+}
+.connect-persist-opt strong {
+  display: block;
+  font-size: 13px;
+  color: var(--ink);
+}
+.connect-persist-opt small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 400;
+}
 .connect-choices {
   display: flex;
   flex-direction: column;

@@ -10,9 +10,14 @@ const STRINGS = {
     backendAuto: "自动（优先经典 Outlook）",
     backendClassic: "经典 Outlook",
     backendGraph: "新 Outlook（进阶）",
-    classicHint: "未连接时点红色「未连接」可选经典 Outlook 或登录 Microsoft。选过一次就会记住。",
+    classicHint: "未连接时点红色「未连接」可选经典 Outlook 或登录 Microsoft。可仅此次有效，或记住选择。",
     connectPickerTitle: "选择邮箱连接方式",
-    connectPickerLede: "请选一种。选完后会记住，不会反复弹出。",
+    connectPickerLede: "请选一种。可仅此次有效，或记住以后都用。",
+    connectPersistLabel: "这次怎么记？",
+    connectPersistOnce: "仅此次",
+    connectPersistOnceHelp: "本次使用。下次启动还会再问。",
+    connectPersistAlways: "记住选择",
+    connectPersistAlwaysHelp: "写入设置。下次启动直接用，不再弹出。",
     pickClassicTitle: "经典 Outlook",
     pickClassicHelp: "打开 outlook.exe 并保持运行。软件通过 COM 读取邮件。",
     pickGraphTitle: "新 Outlook / 登录 Microsoft",
@@ -134,9 +139,14 @@ const STRINGS = {
     backendAuto: "Auto (Classic Outlook first)",
     backendClassic: "Classic Outlook",
     backendGraph: "New Outlook (advanced)",
-    classicHint: "When offline, click the red Offline pill to choose Classic Outlook or Microsoft sign-in. We remember the choice.",
+    classicHint: "When offline, click the red Offline pill to choose Classic Outlook or Microsoft sign-in. Use it this time only, or remember it.",
     connectPickerTitle: "How do you want to connect?",
-    connectPickerLede: "Pick one. We’ll remember it and won’t keep asking.",
+    connectPickerLede: "Pick a connection. Use it this time only, or remember it for next time.",
+    connectPersistLabel: "Remember this choice?",
+    connectPersistOnce: "This time only",
+    connectPersistOnceHelp: "Apply for this session. We’ll ask again next launch.",
+    connectPersistAlways: "Always",
+    connectPersistAlwaysHelp: "Save this choice. We won’t ask again.",
     pickClassicTitle: "Classic Outlook",
     pickClassicHelp: "Open outlook.exe and leave it running. Save Dates talks to it over COM.",
     pickGraphTitle: "New Outlook / Sign in to Microsoft",
@@ -527,8 +537,14 @@ function showConnectPicker() {
   if (!overlay) return;
   overlay.classList.remove("hidden");
   document.body.classList.add("modal-open");
+  const always = $("connectPersistAlways");
+  if (always) always.checked = true;
   const first = $("pickClassic");
   if (first) first.focus();
+}
+
+function shouldPersistBackend() {
+  return Boolean($("connectPersistAlways")?.checked);
 }
 
 function hideConnectPicker() {
@@ -546,7 +562,10 @@ function openConnectPickerFromStatus() {
 async function chooseClassicOutlook() {
   hideConnectPicker();
   try {
-    await api("/api/settings", { method: "PUT", body: JSON.stringify({ backend: "classic" }) });
+    await api("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({ backend: "classic", persist_backend: shouldPersistBackend() }),
+    });
     setBanner(t("pickingClassic"));
     await refreshStatus();
   } catch (err) {
@@ -558,7 +577,10 @@ async function chooseGraphOutlook() {
   hideConnectPicker();
   setBanner(t("loggingIn"));
   try {
-    await api("/api/settings", { method: "PUT", body: JSON.stringify({ backend: "graph" }) });
+    await api("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({ backend: "graph", persist_backend: shouldPersistBackend() }),
+    });
     const status = await api("/api/microsoft/login", { method: "POST" });
     applyStatus(status);
     setBanner(status.connected ? t("msConnected") : "");

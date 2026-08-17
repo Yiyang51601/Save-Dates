@@ -11,6 +11,7 @@ from save_dates.config import DATA_DIR, DB_PATH, SETTINGS_PATH
 from save_dates.i18n import system_ui_lang
 
 _lock = threading.Lock()
+_session_backend: str | None = None
 
 
 def _connect() -> sqlite3.Connection:
@@ -466,11 +467,27 @@ def _lang_user_set(data: dict[str, Any]) -> bool:
     return saved == "en"
 
 
+def set_session_backend(backend: str | None) -> None:
+    """Use this Outlook backend until the process exits; do not write settings.json."""
+    global _session_backend
+    if backend in {"auto", "classic", "graph"}:
+        _session_backend = backend
+    else:
+        _session_backend = None
+
+
+def clear_session_backend() -> None:
+    global _session_backend
+    _session_backend = None
+
+
 def get_settings() -> dict[str, Any]:
     data = _read_settings_file()
     backend = data.get("backend", "auto")
     if backend not in {"auto", "classic", "graph"}:
         backend = "auto"
+    if _session_backend in {"auto", "classic", "graph"}:
+        backend = _session_backend
     client_id = str(data.get("graph_client_id") or "").strip()
     if _lang_user_set(data):
         lang = "en" if data.get("lang") == "en" else "zh"
@@ -492,6 +509,7 @@ def save_settings(patch: dict[str, Any]) -> dict[str, Any]:
     backend = data.get("backend", "auto")
     if "backend" in patch and patch["backend"] in {"auto", "classic", "graph"}:
         backend = patch["backend"]
+        clear_session_backend()
     if backend not in {"auto", "classic", "graph"}:
         backend = "auto"
     out["backend"] = backend

@@ -113,6 +113,25 @@
     <div class="modal" role="document">
       <h2 id="connectPickerTitle" data-i18n="connectPickerTitle"></h2>
       <p class="modal-lede" data-i18n="connectPickerLede"></p>
+      <div class="connect-persist" role="radiogroup" aria-labelledby="connectPersistLabel">
+        <p id="connectPersistLabel" class="connect-persist-label" data-i18n="connectPersistLabel"></p>
+        <div class="connect-persist-opts">
+          <label class="connect-persist-opt">
+            <input type="radio" name="connectPersist" id="connectPersistOnce" value="once" />
+            <span>
+              <strong data-i18n="connectPersistOnce"></strong>
+              <small data-i18n="connectPersistOnceHelp"></small>
+            </span>
+          </label>
+          <label class="connect-persist-opt">
+            <input type="radio" name="connectPersist" id="connectPersistAlways" value="always" checked />
+            <span>
+              <strong data-i18n="connectPersistAlways"></strong>
+              <small data-i18n="connectPersistAlwaysHelp"></small>
+            </span>
+          </label>
+        </div>
+      </div>
       <div class="connect-choices">
         <button type="button" class="connect-choice" id="pickClassic">
           <strong data-i18n="pickClassicTitle"></strong>

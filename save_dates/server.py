@@ -62,6 +62,7 @@ class CandidatePatch(BaseModel):
 class SettingsPatch(BaseModel):
     lang: str | None = None
     backend: str | None = None
+    persist_backend: bool | None = None
     graph_client_id: str | None = None
 
 
@@ -648,9 +649,18 @@ def api_desktop_show() -> dict:
 
 @app.put("/api/settings")
 def api_put_settings(patch: SettingsPatch) -> dict:
-    saved = db.save_settings(patch.model_dump(exclude_none=True))
+    data = patch.model_dump(exclude_none=True)
+    persist = data.pop("persist_backend", True)
+    backend = data.get("backend")
+    if backend in {"auto", "classic", "graph"} and persist is False:
+        data.pop("backend", None)
+        db.set_session_backend(backend)
+        if data:
+            db.save_settings(data)
+    else:
+        db.save_settings(data)
     watcher.notify(0)
-    return saved
+    return db.get_settings()
 
 
 @app.post("/api/microsoft/login")
