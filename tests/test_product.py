@@ -865,3 +865,52 @@ def test_accept_event_writes_location_and_notes(monkeypatch):
         assert captured["location"] == "Room 101"
         assert "Bring ID" in captured["body"]
         assert captured["title"]
+
+
+def test_long_location_and_notes_patch_reaches_calendar(monkeypatch):
+    captured = {}
+
+    def fake_create_event(**kwargs):
+        captured.update(kwargs)
+        return "cal-long"
+
+    monkeypatch.setattr("save_dates.server.watcher.create_event", fake_create_event)
+    location = "Public Health Building 5F A521/A522 " + ("East Wing " * 8)
+    notes = "入口：Fifth Ave entrance (under sculpture)\n要带：charged phone or laptop\n" + ("RSVP staff desk. " * 20)
+    assert len(location) > 90
+    assert len(notes) > 200
+    with TestClient(app) as client:
+        client.post("/api/scan", json={"demo": True})
+        items = client.get("/api/candidates?status=pending").json()["items"]
+        event = next(item for item in items if item.get("kind") == "event")
+        patched = client.patch(
+            f"/api/candidates/{event['id']}",
+            json={"location": location, "notes": notes},
+        )
+        assert patched.status_code == 200, patched.text
+        assert "Input should be less than or equal" not in patched.text
+        assert patched.json()["item"]["location"] == location
+        assert "Fifth Ave" in patched.json()["item"]["notes"]
+        accepted = client.post(f"/api/candidates/{event['id']}/accept")
+        assert accepted.status_code == 200, accepted.text
+        assert captured["location"] == location[:255]
+        assert "Fifth Ave" in captured["body"]
+        assert "charged phone" in captured["body"]
+
+
+def test_scan_over_limits_returns_clear_code_not_pydantic_dump():
+    with TestClient(app) as client:
+        response = client.post("/api/scan", json={"days": 91, "max_emails": 201})
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert detail == "scan_limits"
+        assert "Input should" not in str(detail)
+
+
+def test_ui_translates_scan_limit_errors():
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "save_dates" / "static" / "app.js").read_text(encoding="utf-8")
+    assert "scan_limits" in js
+    assert "扫描范围最多 90 天" in js
+    assert "Scan lookback is at most 90 days and 200 messages." in js

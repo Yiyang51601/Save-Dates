@@ -9,7 +9,8 @@ from datetime import datetime, timedelta
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 from pydantic import BaseModel, Field
@@ -20,11 +21,15 @@ from save_dates.config import (
     DEFAULT_MAX_EMAILS,
     DEFAULT_SCAN_DAYS,
     HOST,
+    LOCATION_FIELD_MAX,
+    LOCATION_WRITE_MAX,
+    NOTES_FIELD_MAX,
     PENDING_LIST_LIMIT,
     PORT,
     SEARCH_MAX_EMAILS,
     SEARCH_SCAN_DAYS,
     STATIC_DIR,
+    TITLE_FIELD_MAX,
 )
 from save_dates.display_title import calendar_write_title
 from save_dates.extract import ensure_aware, local_tz
@@ -50,6 +55,38 @@ app = FastAPI(title="Save Dates", docs_url=None, redoc_url=None, lifespan=lifesp
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+def _validation_code(exc: RequestValidationError) -> str:
+    fields: list[str] = []
+    for err in exc.errors():
+        loc = [str(part) for part in (err.get("loc") or ()) if str(part) not in {"body", "query", "path"}]
+        if not loc:
+            continue
+        name = loc[-1]
+        if name not in fields:
+            fields.append(name)
+    names = set(fields)
+    if "days" in names and "max_emails" in names:
+        return "scan_limits"
+    if "days" in names:
+        return "scan_days_max"
+    if "max_emails" in names:
+        return "scan_emails_max"
+    if "location" in names and "notes" in names:
+        return "location_notes_too_long"
+    if "location" in names:
+        return "location_too_long"
+    if "notes" in names:
+        return "notes_too_long"
+    if "title" in names:
+        return "title_too_long"
+    return "invalid_input"
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+    return JSONResponse(status_code=422, content={"detail": _validation_code(exc)})
+
+
 @app.middleware("http")
 async def no_cache_ui(request: Request, call_next):
     response = await call_next(request)
@@ -68,12 +105,12 @@ class ScanRequest(BaseModel):
 
 
 class CandidatePatch(BaseModel):
-    title: str | None = None
+    title: str | None = Field(default=None, max_length=TITLE_FIELD_MAX)
     start_at: str | None = None
     end_at: str | None = None
     all_day: bool | None = None
-    location: str | None = None
-    notes: str | None = None
+    location: str | None = Field(default=None, max_length=LOCATION_FIELD_MAX)
+    notes: str | None = Field(default=None, max_length=NOTES_FIELD_MAX)
 
 
 class SettingsPatch(BaseModel):
@@ -96,19 +133,19 @@ class SearchPinRequest(BaseModel):
     subject: str
     sender: str
     received_at: str
-    title: str
+    title: str = Field(max_length=TITLE_FIELD_MAX)
     start_at: str
     end_at: str
     all_day: bool = False
-    snippet: str = ""
+    snippet: str = Field(default="", max_length=NOTES_FIELD_MAX)
     matched_text: str = ""
     confidence: float = 0.5
     fuzzy: bool = False
     kind: str = "event"
     task_type: str = ""
     mailbox: str = ""
-    location: str = ""
-    notes: str = ""
+    location: str = Field(default="", max_length=LOCATION_FIELD_MAX)
+    notes: str = Field(default="", max_length=NOTES_FIELD_MAX)
 
 
 class SearchOpenRequest(BaseModel):
@@ -587,7 +624,7 @@ def _source_body(item: dict) -> str:
 
 
 def _write_body(item: dict) -> str:
-    notes = str(item.get("notes") or "").strip()
+    notes = str(item.get("notes") or "").strip()[:NOTES_FIELD_MAX]
     source = _source_body(item)
     if notes and notes not in source:
         return f"{notes}\n\n{source}"
@@ -629,7 +666,7 @@ def _accept_one(candidate_id: int) -> dict:
             end=end,
             all_day=bool(item["all_day"]),
             body=body,
-            location=str(item.get("location") or ""),
+            location=str(item.get("location") or "")[:LOCATION_WRITE_MAX],
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail="calendar_write_failed") from exc

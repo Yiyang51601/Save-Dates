@@ -13,6 +13,7 @@ from save_dates.config import (
     DEFAULT_MAX_EMAILS,
     DEFAULT_SCAN_DAYS,
     GRAPH_ID_PREFIX,
+    LOCATION_WRITE_MAX,
     REMINDER_MINUTES_ALL_DAY,
     REMINDER_MINUTES_TIMED,
 )
@@ -274,7 +275,7 @@ def create_calendar_event(
     tz_name = str(local_tz())
     payload = {
         "subject": title[:255],
-        "body": {"contentType": "text", "content": body or ""},
+        "body": {"contentType": "text", "content": (body or "")[:BODY_CHAR_LIMIT]},
         "start": {"dateTime": _wall_time(start), "timeZone": tz_name},
         "end": {"dateTime": _wall_time(end), "timeZone": tz_name},
         "isAllDay": bool(all_day),
@@ -287,7 +288,7 @@ def create_calendar_event(
     }
     loc = (location or "").strip()
     if loc:
-        payload["location"] = {"displayName": loc[:255]}
+        payload["location"] = {"displayName": loc[:LOCATION_WRITE_MAX]}
     data = graph_request("POST", f"{GRAPH_ROOT}/me/events", token, json=payload)
     return str(data.get("id") or "")
 
@@ -306,7 +307,7 @@ def create_todo_task(token: str, title: str, body: str) -> str:
             token,
             json={
                 "title": title[:255],
-                "body": {"content": body, "contentType": "text"},
+                "body": {"content": (body or "")[:BODY_CHAR_LIMIT], "contentType": "text"},
             },
         )
     except RuntimeError as exc:

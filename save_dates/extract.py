@@ -12,7 +12,13 @@ from zoneinfo import ZoneInfo
 from bs4 import BeautifulSoup
 from tzlocal import get_localzone
 
-from save_dates.config import BODY_CHAR_LIMIT, MAX_FUTURE_DAYS, PAST_GRACE_HOURS
+from save_dates.config import (
+    BODY_CHAR_LIMIT,
+    LOCATION_WRITE_MAX,
+    MAX_FUTURE_DAYS,
+    NOTES_FIELD_MAX,
+    PAST_GRACE_HOURS,
+)
 from save_dates.mail_search import expand_query
 
 CN_WEEKDAY = {
@@ -185,7 +191,22 @@ _EN_ROOM = re.compile(r"(?i)\b(?:room|rm\.?)\s*([A-Za-z]?\d{2,5}(?:\s*/\s*[A-Za-
 _CN_ROOM = re.compile(r"(?:教室|会议室|室)\s*([A-Za-z]?\d{2,5}(?:\s*/\s*[A-Za-z]?\d{2,5})*)")
 _NOTE_LOOSE = re.compile(
     r"(?i)((?:please\s+)?(?:bring|rsvp\b|enter(?:\s+via)?|park(?:ing)?(?:\s+at)?|"
-    r"wear|dress(?:\s+code)?)\s*[^\n。.]{3,160})"
+    r"wear|dress(?:\s+code)?)\s*[^\n。.]{3,72})"
+)
+_NOTE_LINE_MAX = 80
+_CLAUSE_SPLIT = re.compile(r"[。！？!?\n]|[；;]")
+_NOTE_PREFIX = re.compile(
+    r"(?i)^(建议|请您?|请|kindly\s+|please\s+(?:be\s+sure\s+to\s+)?|"
+    r"make\s+sure\s+to\s+|remember\s+to\s+|we\s+recommend\s+(?:that\s+you\s+)?)"
+)
+_NOTE_FROM = re.compile(r"(?i)^(?:从|via|from)\s+")
+_NOTE_TAIL = re.compile(
+    r"(?i)(?:，|,)\s*(?:现场有.{0,24}(?:需要使用|请参加|要用)|欢迎参加|"
+    r"there\s+will\s+be.{0,40}|see\s+you\s+there.{0,20}|looking\s+forward.{0,40})$"
+)
+_ENTER_VIA = re.compile(r"(?i)入口进")
+_SOFT_SPLIT = re.compile(
+    r"(?i)(?:，|,)\s*(?=现场|欢迎|there\s+will|so\s+that|because\s+there)"
 )
 
 
@@ -217,11 +238,35 @@ def _clip_field(value: str, limit: int) -> str:
     return value.strip(" ，,;；")
 
 
+def _first_clause(value: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+    soft = _SOFT_SPLIT.search(text)
+    if soft and soft.start() >= 6:
+        text = text[: soft.start()].strip()
+    match = _CLAUSE_SPLIT.search(text)
+    if match and match.start() >= 6:
+        text = text[: match.start()].strip()
+    return text.strip(" ，,;；")
+
+
+def _short_phrase(value: str, limit: int = _NOTE_LINE_MAX) -> str:
+    text = _first_clause(_clip_field(value, max(limit * 3, 48)))
+    text = _NOTE_PREFIX.sub("", text).strip()
+    text = _NOTE_FROM.sub("", text).strip()
+    text = _NOTE_TAIL.sub("", text).strip()
+    text = _ENTER_VIA.sub("入口", text)
+    text = re.sub(r"\s{2,}", " ", text)
+    return _clip_field(text, limit)
+
+
 def _clean_loc(value: str) -> str:
-    value = _clip_field(value, 255)
+    value = _first_clause(value)
+    value = _clip_field(value, LOCATION_WRITE_MAX)
     value = value.replace("，", " ").replace("、", " ").replace("；", " ")
     value = re.sub(r"[ \t,]+", " ", value).strip(" ,")
-    return value[:255]
+    return value[:LOCATION_WRITE_MAX]
 
 
 def _is_dateish(value: str) -> bool:
@@ -240,7 +285,12 @@ def _labeled_fields(text: str) -> list[tuple[str, str]]:
     rows: list[tuple[str, str]] = []
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        value = _clip_field(text[match.end() : end], 400)
+        chunk = text[match.end() : end].split("\n\n")[0]
+        lines = [line.strip() for line in chunk.split("\n") if line.strip()]
+        value = lines[0] if lines else ""
+        if len(value) < 8 and len(lines) > 1:
+            value = f"{value} {lines[1]}".strip()
+        value = _clip_field(value, 160)
         if value:
             rows.append((_norm_label(match["label"]), value))
     return rows
@@ -260,7 +310,7 @@ def _join_place(*parts: str) -> str:
             continue
         seen.append(piece)
         blob = " ".join(seen)
-    return blob[:255]
+    return blob[:LOCATION_WRITE_MAX]
 
 
 def _meet_urls(text: str) -> list[str]:
@@ -320,10 +370,13 @@ def extract_location_notes(subject: str, body: str) -> tuple[str, str]:
     floor = ""
     note_lines: list[str] = []
     note_seen: set[str] = set()
+    labeled_notes = 0
 
-    def add_note(label: str, value: str) -> None:
-        text_value = _clip_field(value, 400)
-        if not text_value:
+    def add_note(label: str, value: str, *, phrase: bool = True) -> None:
+        text_value = _short_phrase(value) if phrase else _clip_field(value, LOCATION_WRITE_MAX)
+        if not text_value or _is_dateish(text_value):
+            return
+        if phrase and len(text_value) > 100 and len(text_value) > max(40, len(text) // 4):
             return
         key = fold_search(text_value)
         if key in note_seen:
@@ -331,7 +384,8 @@ def extract_location_notes(subject: str, body: str) -> tuple[str, str]:
         note_seen.add(key)
         pretty = label.strip()
         line = f"{pretty}：{text_value}" if pretty else text_value
-        note_lines.append(line[:420])
+        cap = LOCATION_WRITE_MAX + 8 if not phrase else _NOTE_LINE_MAX + 12
+        note_lines.append(line[:cap])
 
     for label, value in _labeled_fields(text):
         if label in skip_labels:
@@ -347,7 +401,10 @@ def extract_location_notes(subject: str, body: str) -> tuple[str, str]:
                 venue_parts.append(value)
             continue
         if label in note_labels:
+            before = len(note_lines)
             add_note(label, value)
+            if len(note_lines) > before:
+                labeled_notes += 1
 
     location = _join_place(*(venue_parts + [building, floor, room]))
     if not location:
@@ -362,18 +419,19 @@ def extract_location_notes(subject: str, body: str) -> tuple[str, str]:
     if location and _ONLINE_LOC.match(location) and first_url:
         location = _join_place(location, first_url)
     elif not location and first_url:
-        location = first_url[:255]
+        location = first_url[:LOCATION_WRITE_MAX]
     for url in urls:
         if location and url.casefold() in location.casefold():
             continue
-        add_note("链接", url)
+        add_note("链接", url, phrase=False)
 
-    for match in _NOTE_LOOSE.finditer(text):
-        snippet = _clip_field(match.group(1), 200)
-        if snippet and not _is_dateish(snippet):
-            add_note("", snippet)
+    if not labeled_notes:
+        for match in _NOTE_LOOSE.finditer(text):
+            snippet = _short_phrase(match.group(1))
+            if snippet and not _is_dateish(snippet):
+                add_note("", snippet)
 
-    notes = "\n".join(note_lines).strip()[:2000]
+    notes = "\n".join(note_lines[:8]).strip()[:NOTES_FIELD_MAX]
     if location and notes:
         kept: list[str] = []
         for line in notes.split("\n"):

@@ -8,6 +8,7 @@ from save_dates.config import (
     CATEGORY_NAME,
     DEFAULT_MAX_EMAILS,
     DEFAULT_SCAN_DAYS,
+    LOCATION_WRITE_MAX,
     REMINDER_MINUTES_ALL_DAY,
     REMINDER_MINUTES_TIMED,
 )
@@ -184,7 +185,7 @@ def _events_from_item(
             confidence=0.72,
             fuzzy=False,
             kind="event",
-            location=location or outlook_loc[:255],
+            location=location or outlook_loc[:LOCATION_WRITE_MAX],
             notes=notes,
         )
     ]
@@ -244,7 +245,7 @@ def mail_to_candidates(item: Any, now: datetime | None = None) -> tuple[str, lis
                 "fuzzy": event.fuzzy,
                 "kind": event.kind,
                 "task_type": event.task_type,
-                "location": event.location or outlook_loc[:255],
+                "location": event.location or outlook_loc[:LOCATION_WRITE_MAX],
                 "notes": event.notes or "",
             }
         )
@@ -668,10 +669,10 @@ def create_calendar_event_with_app(
     loc = (location or "").strip()
     if loc:
         try:
-            appt.Location = loc[:255]
+            appt.Location = loc[:LOCATION_WRITE_MAX]
         except Exception:
             pass
-    text = body or ""
+    text = (body or "")[:BODY_CHAR_LIMIT]
     if text:
         try:
             appt.Body = text
@@ -694,7 +695,7 @@ def create_calendar_event_with_app(
 def create_task_with_app(app: Any, title: str, body: str) -> str:
     task = app.CreateItem(OL_TASK)
     task.Subject = title[:255]
-    task.Body = body
+    task.Body = (body or "")[:BODY_CHAR_LIMIT]
     try:
         task.Categories = CATEGORY_NAME
     except Exception:

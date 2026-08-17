@@ -113,6 +113,36 @@ def test_graph_calendar_payload_includes_location_and_body(monkeypatch):
     assert "要带" in payload["body"]["content"]
 
 
+def test_graph_calendar_truncates_overlong_location(monkeypatch):
+    from datetime import datetime, timedelta
+
+    from save_dates import graph_client
+
+    captured = {}
+
+    def fake_request(method, url, token, json=None):
+        captured["json"] = json
+        return {"id": "evt-long"}
+
+    monkeypatch.setattr(graph_client, "graph_request", fake_request)
+    start = datetime(2026, 8, 20, 9, 0, tzinfo=TZ)
+    location = "Public Health Building " + ("A521/A522 " * 40)
+    notes = "入口：Fifth Ave\n要带：phone\n" + ("x" * 300)
+    graph_client.create_calendar_event(
+        "tok",
+        "SPH Orientation",
+        start,
+        start + timedelta(hours=1),
+        False,
+        body=notes,
+        location=location,
+    )
+    display = captured["json"]["location"]["displayName"]
+    assert len(display) == 255
+    assert display.startswith("Public Health Building")
+    assert captured["json"]["body"]["content"].startswith("入口：Fifth Ave")
+
+
 def test_graph_calendar_omits_empty_location(monkeypatch):
     from datetime import datetime, timedelta
 

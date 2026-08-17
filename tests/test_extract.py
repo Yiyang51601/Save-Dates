@@ -242,6 +242,32 @@ def test_extracts_location_and_notes_from_labeled_event_mail():
     assert event.location == location
     assert event.notes == notes
     assert "Orientation" in event.title
+    assert "现场有活动需要使用" not in notes
+    assert "Welcome" not in notes
+    assert len(location) <= 255
+    for line in notes.split("\n"):
+        assert len(line) <= 100
+    assert len(notes) < len(body)
+
+
+def test_notes_do_not_swallow_the_rest_of_the_mail():
+    from save_dates.extract import extract_location_notes
+
+    padding = "Welcome to Pitt SPH. This orientation week includes many sessions. " * 12
+    body = (
+        "时间：2026年8月20日（周四）\n"
+        "地点：Public Health Building 5楼，A521/A522\n"
+        "入口：建议从 Fifth Avenue 入口进（大雕塑正下方）\n"
+        "要带：充满电的手机、平板或电脑，现场有活动需要使用。\n"
+        f"{padding}"
+    )
+    location, notes = extract_location_notes("Orientation", body)
+    assert "Public Health Building" in location
+    assert "A521" in location
+    assert "Fifth Avenue" in notes
+    assert "手机" in notes
+    assert padding.strip() not in notes
+    assert "orientation week includes many sessions" not in notes.lower()
 
 
 def test_extracts_english_venue_rsvp_and_what_to_bring():
