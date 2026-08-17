@@ -19,6 +19,7 @@ def test_home_and_static():
         assert "searchPlaceholder" in home.text
         css = client.get("/static/styles.css")
         assert css.status_code == 200
+        assert "empty-hint-out" in css.text
         js = client.get("/static/app.js")
         assert js.status_code == 200
         assert "搜邮件里的活动" in js.text
@@ -27,6 +28,14 @@ def test_home_and_static():
         assert "How do you want to connect?" in js.text
         assert "You do not type an Application ID" in js.text
         assert "connectPickerAutoShown" in js.text
+        assert "detectSystemLang" in js.text
+        assert "emptyHintSessionDone" in js.text
+        assert "empty-hint-out" in js.text
+        assert "讲座通知" not in js.text
+        assert "导师往来" not in js.text
+        assert "advisor threads" not in js.text
+        assert "在等新邮件。会议、截止日期、活动里的日期会出现在这里。" in js.text
+        assert "Waiting for mail. Dated items from meetings, deadlines, and events will show up here." in js.text
 
 
 def test_status_and_demo_review_flow():
@@ -70,7 +79,9 @@ def test_language_setting_and_demo_cannot_open_mail():
         saved = client.put("/api/settings", json={"lang": "en"})
         assert saved.status_code == 200
         assert saved.json()["lang"] == "en"
+        assert saved.json()["lang_set"] is True
         assert client.get("/api/settings").json()["lang"] == "en"
+        assert client.get("/api/settings").json()["lang_set"] is True
 
         scan = client.post("/api/scan", json={"demo": True})
         assert scan.status_code == 200

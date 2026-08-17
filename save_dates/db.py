@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from save_dates.config import DATA_DIR, DB_PATH, SETTINGS_PATH
+from save_dates.i18n import system_ui_lang
 
 _lock = threading.Lock()
 
@@ -446,32 +447,64 @@ def dump_debug(path: Path | None = None) -> Path:
     return path
 
 
-def get_settings() -> dict[str, Any]:
+def _read_settings_file() -> dict[str, Any]:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     if not SETTINGS_PATH.exists():
-        return {"lang": "zh", "backend": "auto", "graph_client_id": ""}
+        return {}
     try:
         data = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
     except Exception:
-        return {"lang": "zh", "backend": "auto", "graph_client_id": ""}
-    lang = data.get("lang", "zh")
-    if lang not in {"zh", "en"}:
-        lang = "zh"
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _lang_user_set(data: dict[str, Any]) -> bool:
+    saved = data.get("lang")
+    if data.get("lang_set") is True and saved in {"zh", "en"}:
+        return True
+    # Legacy files never defaulted to EN, so an explicit EN choice must be kept.
+    return saved == "en"
+
+
+def get_settings() -> dict[str, Any]:
+    data = _read_settings_file()
     backend = data.get("backend", "auto")
     if backend not in {"auto", "classic", "graph"}:
         backend = "auto"
     client_id = str(data.get("graph_client_id") or "").strip()
-    return {"lang": lang, "backend": backend, "graph_client_id": client_id}
+    if _lang_user_set(data):
+        lang = "en" if data.get("lang") == "en" else "zh"
+        lang_set = True
+    else:
+        lang = system_ui_lang()
+        lang_set = False
+    return {
+        "lang": lang,
+        "lang_set": lang_set,
+        "backend": backend,
+        "graph_client_id": client_id,
+    }
 
 
 def save_settings(patch: dict[str, Any]) -> dict[str, Any]:
-    current = get_settings()
-    if "lang" in patch and patch["lang"] in {"zh", "en"}:
-        current["lang"] = patch["lang"]
+    data = _read_settings_file()
+    out: dict[str, Any] = {}
+    backend = data.get("backend", "auto")
     if "backend" in patch and patch["backend"] in {"auto", "classic", "graph"}:
-        current["backend"] = patch["backend"]
+        backend = patch["backend"]
+    if backend not in {"auto", "classic", "graph"}:
+        backend = "auto"
+    out["backend"] = backend
+    client_id = str(data.get("graph_client_id") or "").strip()
     if "graph_client_id" in patch and patch["graph_client_id"] is not None:
-        current["graph_client_id"] = str(patch["graph_client_id"]).strip()
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    SETTINGS_PATH.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
-    return current
+        client_id = str(patch["graph_client_id"]).strip()
+    if client_id:
+        out["graph_client_id"] = client_id
+    if "lang" in patch and patch["lang"] in {"zh", "en"}:
+        out["lang"] = patch["lang"]
+        out["lang_set"] = True
+    elif _lang_user_set(data):
+        out["lang"] = "en" if data.get("lang") == "en" else "zh"
+        out["lang_set"] = True
+    SETTINGS_PATH.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    return get_settings()

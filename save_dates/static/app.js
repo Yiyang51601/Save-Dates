@@ -57,8 +57,8 @@ const STRINGS = {
     searchInbox: "收件箱",
     searchMailOnly: "未识别出活动",
     searchOpen: "原邮件",
-    empty: "在等新邮件。讲座通知、导师往来里的日期会出现在这里。",
-    emptyTasks: "暂无待办。没写时间的作业、待约见面、等回复会出现在这里。",
+    empty: "在等新邮件。会议、截止日期、活动里的日期会出现在这里。",
+    emptyTasks: "暂无待办。没写具体时间的事项会出现在这里。",
     emptyPromo: "暂无广告。带退订、优惠券的推销邮件会出现在这里，点清掉才进垃圾箱。",
     laneEvent: "日程",
     laneTask: "待办",
@@ -181,8 +181,8 @@ const STRINGS = {
     searchInbox: "Inbox",
     searchMailOnly: "No event extracted",
     searchOpen: "Mail",
-    empty: "Waiting for mail. Lectures, advisor threads, and other dates show up here.",
-    emptyTasks: "No open loops yet. Homework without a due date, unscheduled meetings, and waiting-for-a-reply items show up here.",
+    empty: "Waiting for mail. Dated items from meetings, deadlines, and events will show up here.",
+    emptyTasks: "No open loops yet. Items without a set time show up here.",
     emptyPromo: "No ads yet. Promos with unsubscribe or coupons show up here. Nothing is junked until you clear it.",
     laneEvent: "Calendar",
     laneTask: "Tasks",
@@ -253,7 +253,16 @@ const STRINGS = {
   },
 };
 
-let lang = "zh";
+function detectSystemLang() {
+  const tags = [navigator.language, ...(navigator.languages || [])];
+  for (const tag of tags) {
+    const normalized = String(tag || "").toLowerCase().replace(/_/g, "-");
+    if (normalized.startsWith("zh")) return "zh";
+  }
+  return "en";
+}
+
+let lang = detectSystemLang();
 let lastItems = [];
 let lastStatus = null;
 let currentLane = "event";
@@ -265,6 +274,11 @@ let lastSearchMeta = { scanned: 0, live: false };
 let searchTimer = 0;
 let searchSeq = 0;
 let connectPickerAutoShown = false;
+let listReady = false;
+let emptyHintSessionDone = false;
+let emptyHintTimer = 0;
+const EMPTY_HINT_MS = 4200;
+const EMPTY_HINT_FADE_MS = 900;
 
 function t(key, vars = {}) {
   const table = STRINGS[lang] || STRINGS.zh;
@@ -288,7 +302,7 @@ function applyI18n() {
   });
   updateLaneButtons(lastItems);
   if (lastStatus) applyStatus(lastStatus);
-  if (lastItems.length) render(lastItems);
+  render(lastItems);
   if (lastSearchQuery) renderSearch(lastSearchItems, lastSearchQuery, lastSearchMeta);
 }
 
@@ -558,7 +572,7 @@ async function refreshStatus() {
   try {
     const s = await api("/api/status");
     if (s.settings?.lang && s.settings.lang !== lang) {
-      lang = s.settings.lang;
+      lang = s.settings.lang === "en" ? "en" : "zh";
       applyI18n();
     }
     applyStatus(s);
@@ -639,16 +653,50 @@ function updateMailboxButtons(items) {
   host.innerHTML = buttons.join("");
 }
 
+function emptyHintKey() {
+  if (currentLane === "task") return "emptyTasks";
+  if (currentLane === "promo") return "emptyPromo";
+  return "empty";
+}
+
+function updateEmptyHint(hasItems) {
+  const el = $("empty");
+  if (!el) return;
+  if (!listReady) {
+    el.classList.add("hidden");
+    return;
+  }
+  if (hasItems) {
+    el.classList.add("hidden");
+    el.classList.remove("empty-hint-out");
+    if (emptyHintTimer) emptyHintSessionDone = true;
+    return;
+  }
+  if (emptyHintSessionDone) {
+    el.classList.add("hidden");
+    el.classList.remove("empty-hint-out");
+    return;
+  }
+  el.textContent = t(emptyHintKey());
+  el.classList.remove("hidden");
+  if (emptyHintTimer) return;
+  emptyHintTimer = window.setTimeout(() => {
+    el.classList.add("empty-hint-out");
+    window.setTimeout(() => {
+      emptyHintSessionDone = true;
+      el.classList.add("hidden");
+      el.classList.remove("empty-hint-out");
+    }, EMPTY_HINT_FADE_MS);
+  }, EMPTY_HINT_MS);
+}
+
 function render(items) {
   lastItems = items;
   updateLaneButtons(items);
   const visible = laneItems(items, currentLane);
   const list = $("list");
   list.innerHTML = "";
-  $("empty").textContent = t(
-    currentLane === "task" ? "emptyTasks" : currentLane === "promo" ? "emptyPromo" : "empty"
-  );
-  $("empty").classList.toggle("hidden", visible.length > 0);
+  updateEmptyHint(visible.length > 0);
   const weekdays = t("weekdays");
   for (const item of visible) {
     const start = parseTs(item.start_at);
@@ -870,6 +918,7 @@ async function runMailSearch(query) {
 
 async function loadList() {
   const data = await api("/api/candidates?status=pending");
+  listReady = true;
   render(data.items || []);
   setCounts(data.counts);
 }
@@ -1226,10 +1275,17 @@ async function boot() {
     lang = settings.lang === "en" ? "en" : "zh";
     applyI18n();
   } catch {
-    lang = "zh";
+    lang = detectSystemLang();
+    applyI18n();
   }
   await refreshStatus();
-  await loadList().catch((err) => setBanner(err.message, true));
+  try {
+    await loadList();
+  } catch (err) {
+    listReady = true;
+    updateEmptyHint(false);
+    setBanner(err.message, true);
+  }
   connectLive();
 }
 

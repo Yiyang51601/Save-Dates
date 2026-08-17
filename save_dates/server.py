@@ -27,6 +27,7 @@ from save_dates.config import (
 )
 from save_dates.extract import ensure_aware, local_tz
 from save_dates.greet import given_name, greeting_phrase
+from save_dates.i18n import system_ui_lang
 from save_dates.watcher import watcher
 
 
@@ -109,7 +110,7 @@ def _public_settings() -> dict:
 
 def _snap_payload(snap, extra: dict | None = None) -> dict:
     settings = _public_settings()
-    lang = settings.get("lang") or "zh"
+    lang = settings.get("lang") or system_ui_lang()
     payload = {
         "connected": snap.connected,
         "watching": snap.watching,

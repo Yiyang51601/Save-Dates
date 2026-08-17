@@ -308,7 +308,13 @@ body[data-lang="en"] .card h2 {
   outline: 2px solid var(--green);
   box-shadow: 0 0 0 3px rgba(31, 107, 74, 0.16);
 }
-.empty { color: var(--muted); line-height: 1.5; }
+.empty {
+  color: var(--muted);
+  line-height: 1.5;
+  opacity: 1;
+  transition: opacity 0.9s ease;
+}
+.empty.empty-hint-out { opacity: 0; }
 .banner {
   margin-top: 12px;
   background: #fff4d6;
