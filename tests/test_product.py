@@ -10,6 +10,8 @@ def test_home_and_static():
         home = client.get("/")
         assert home.status_code == 200
         assert "Save Dates" in home.text
+        assert "进阶 · 仅新 Outlook" in home.text
+        assert "经典 Outlook" in home.text
         css = client.get("/static/styles.css")
         assert css.status_code == 200
         js = client.get("/static/app.js")
@@ -74,8 +76,17 @@ def test_backend_setting_roundtrip():
         saved = client.put("/api/settings", json={"backend": "graph"})
         assert saved.status_code == 200
         assert saved.json()["backend"] == "graph"
-        assert client.get("/api/settings").json()["backend"] == "graph"
+        settings = client.get("/api/settings").json()
+        assert settings["backend"] == "graph"
+        assert settings["has_bundled_graph_client"] is False
         client.put("/api/settings", json={"backend": "auto"})
+
+
+def test_desktop_show_without_window_is_404():
+    with TestClient(app) as client:
+        response = client.post("/api/desktop/show")
+        assert response.status_code == 404
+        assert response.json()["detail"] == "no_desktop_window"
 
 
 def test_microsoft_login_requires_client_id():

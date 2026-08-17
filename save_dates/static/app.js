@@ -7,22 +7,25 @@ const STRINGS = {
     settings: "设置",
     language: "语言",
     backend: "连接",
-    backendAuto: "自动",
+    backendAuto: "自动（优先经典 Outlook）",
     backendClassic: "经典 Outlook",
-    backendGraph: "新 Outlook",
+    backendGraph: "新 Outlook（进阶）",
+    classicHint: "给朋友：打开经典 Outlook（outlook.exe）并保持运行即可，不用填应用 ID。",
+    advancedNewOutlook: "进阶 · 仅新 Outlook",
+    advancedHelp: "只有不用经典 Outlook、只开新 Outlook 时，才点下面登录 Microsoft。一般人请忽略。",
     loginMs: "登录 Microsoft",
     logoutMs: "退出账号",
     loggingIn: "正在打开 Microsoft 登录页…",
     msConnected: "已用 Microsoft 账号连接。日程会写到同一邮箱的日历。",
-    graphClientId: "应用程序 ID",
+    graphClientId: "应用程序 ID（开发者）",
     saveClientId: "保存",
-    openEntra: "打开 Entra 注册页",
-    graphHelp: "新 Outlook 需要 Microsoft 账号。在 Entra 登记公共客户端，重定向填 http://localhost，权限勾选 Mail.Read、Mail.ReadWrite 和 Calendars.ReadWrite。",
+    openEntra: "开发者：打开 Entra",
+    graphHelp: "朋友不用填。开发者登记一次公共客户端后写入软件，之后大家只点「登录 Microsoft」。",
     liveTitleGraph: "实时同步 · {account}",
     liveMetaGraph: "新 Outlook / Microsoft 365 · 时区 {timezone}",
-    new_outlook_detected: "检测到新 Outlook。它不能用经典接口。请打开经典 Outlook，或登录 Microsoft 账号。",
+    new_outlook_detected: "现在开着的是新 Outlook。请再打开经典 Outlook（开始菜单搜 Outlook）并保持运行。一般不用登录 Microsoft。",
     graph_login_needed: "请登录 Microsoft 账号以连接新 Outlook。",
-    graph_client_id_missing: "还差一次 Microsoft 应用登记。把应用程序(客户端) ID 填到下面再登录。",
+    graph_client_id_missing: "还没有内置的 Microsoft 应用 ID。请改用经典 Outlook，或让开发者把 ID 写进软件后再登录。",
     graph_auth_failed: "Microsoft 登录失败。",
     graph_auth_cancelled: "已取消 Microsoft 登录。",
     graph_request_failed: "Microsoft 邮箱请求失败。",
@@ -68,7 +71,7 @@ const STRINGS = {
     liveMeta: "{timezone}",
     connectedTitle: "已连接 {account}",
     connectedMeta: "{timezone}",
-    offlineMeta: "打开经典 Outlook，或在设置里登录 Microsoft 账号",
+    offlineMeta: "请打开经典 Outlook（outlook.exe）并保持运行",
     serviceDown: "服务未就绪",
     month: "{n}月",
     weekdays: ["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
@@ -88,7 +91,7 @@ const STRINGS = {
     undonePartial: "已撤回。Outlook 里那条可能还在，请到日历或任务里手动删一下。",
     requestFailed: "请求失败",
     outlook_connecting: "正在连接 Outlook…",
-    outlook_not_running: "无法连接经典 Outlook。请打开经典 Outlook 并保持运行，或改用右上角登录 Microsoft 账号。",
+    outlook_not_running: "无法连接经典 Outlook。请打开 outlook.exe 并保持运行。",
     outlook_not_connected: "尚未连接 Outlook。",
     outlook_closed: "Outlook 已关闭，正在等待重新打开…",
     mail_not_found: "找不到原邮件，可能已被删除或移走。",
@@ -107,22 +110,25 @@ const STRINGS = {
     settings: "Settings",
     language: "Language",
     backend: "Connect",
-    backendAuto: "Auto",
+    backendAuto: "Auto (Classic Outlook first)",
     backendClassic: "Classic Outlook",
-    backendGraph: "New Outlook",
+    backendGraph: "New Outlook (advanced)",
+    classicHint: "For friends: open Classic Outlook (outlook.exe) and leave it running. No Application ID needed.",
+    advancedNewOutlook: "Advanced · New Outlook only",
+    advancedHelp: "Use this only if you do not have Classic Outlook. Most people can ignore it.",
     loginMs: "Sign in to Microsoft",
     logoutMs: "Sign out",
     loggingIn: "Opening the Microsoft sign-in page…",
     msConnected: "Signed in with Microsoft. Events go to the same mailbox calendar.",
-    graphClientId: "Application ID",
+    graphClientId: "Application ID (developer)",
     saveClientId: "Save",
-    openEntra: "Open Entra registrations",
-    graphHelp: "New Outlook needs a Microsoft account. Register a public client in Entra, redirect http://localhost, permissions Mail.Read, Mail.ReadWrite, and Calendars.ReadWrite.",
+    openEntra: "Developer: open Entra",
+    graphHelp: "Friends should skip this. The developer registers one public client and ships it in the app. After that, people only click Sign in.",
     liveTitleGraph: "Live sync · {account}",
     liveMetaGraph: "New Outlook / Microsoft 365 · {timezone}",
-    new_outlook_detected: "New Outlook is running. It has no classic automation interface. Open classic Outlook, or sign in with Microsoft.",
+    new_outlook_detected: "New Outlook is running. Open Classic Outlook from the Start menu and leave it running. You usually do not need to sign in with Microsoft.",
     graph_login_needed: "Sign in with Microsoft to connect New Outlook.",
-    graph_client_id_missing: "A one-time Microsoft app registration is needed. Paste the Application (client) ID below, then sign in.",
+    graph_client_id_missing: "No bundled Microsoft app ID yet. Use Classic Outlook, or ask the developer to ship an Application ID first.",
     graph_auth_failed: "Microsoft sign-in failed.",
     graph_auth_cancelled: "Microsoft sign-in was cancelled.",
     graph_request_failed: "The Microsoft mailbox request failed.",
@@ -161,7 +167,7 @@ const STRINGS = {
     connectedTitle: "Connected · {account}",
     connectedMeta: "{timezone}",
     offlineTitle: "Offline",
-    offlineMeta: "Open classic Outlook, or sign in under Settings.",
+    offlineMeta: "Open Classic Outlook (outlook.exe) and leave it running.",
     serviceDown: "Service not ready",
     allDay: "All day",
     around: "Around",
@@ -190,7 +196,7 @@ const STRINGS = {
     undonePartial: "Undone here. The Outlook item may still exist — delete it there if needed.",
     requestFailed: "Request failed",
     outlook_connecting: "Connecting to Outlook…",
-    outlook_not_running: "Could not connect to classic Outlook. Open classic Outlook and keep it running, or sign in with Microsoft instead.",
+    outlook_not_running: "Could not connect to Classic Outlook. Open outlook.exe and leave it running.",
     outlook_not_connected: "Outlook is not connected.",
     outlook_closed: "Outlook closed. Waiting for it to reopen…",
     mail_not_found: "The original message could not be found. It may have been deleted or moved.",
@@ -383,10 +389,16 @@ function applyStatus(s) {
   }
   $("msLoginBtn").classList.toggle("hidden", Boolean(s.graph_logged_in));
   $("msLogoutBtn").classList.toggle("hidden", !s.graph_logged_in);
-  const showSetup = ["graph_client_id_missing", "new_outlook_detected", "graph_login_needed"].includes(s.error)
-    || (s.settings?.backend === "graph" && !s.connected);
-  $("graphSetup").classList.toggle("hidden", !showSetup);
-  if (showSetup) $("settingsPanel").classList.remove("hidden");
+  const bundled = Boolean(s.settings?.has_bundled_graph_client);
+  const savedId = Boolean(s.settings?.graph_client_id);
+  const needId = !bundled && !savedId;
+  const showIdField = needId && (
+    s.error === "graph_client_id_missing" || s.settings?.backend === "graph"
+  );
+  $("graphSetup").classList.toggle("hidden", !showIdField);
+  if (showIdField || s.settings?.backend === "graph") {
+    $("advancedBox").open = true;
+  }
 }
 
 async function refreshStatus() {
@@ -755,7 +767,10 @@ $("msLoginBtn").addEventListener("click", async () => {
     setBanner(status.connected ? t("msConnected") : "");
   } catch (err) {
     setBanner(err.message, true);
-    $("graphSetup").classList.remove("hidden");
+    $("advancedBox").open = true;
+    if (String(err.message).includes("graph_client_id_missing") || t("graph_client_id_missing") === err.message) {
+      $("graphSetup").classList.remove("hidden");
+    }
   }
 });
 

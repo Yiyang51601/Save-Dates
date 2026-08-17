@@ -17,6 +17,19 @@ hiddenimports = [
     "uvicorn.protocols.websockets.auto",
     "uvicorn.lifespan",
     "uvicorn.lifespan.on",
+    "uvicorn.lifespan.off",
+    "h11",
+    "sniffio",
+    "anyio",
+    "anyio._backends._asyncio",
+    "starlette",
+    "starlette.routing",
+    "starlette.responses",
+    "starlette.staticfiles",
+    "fastapi",
+    "fastapi.routing",
+    "httpx",
+    "httpcore",
     "win32timezone",
     "pythoncom",
     "pywintypes",
@@ -44,7 +57,19 @@ hiddenimports = [
     "msal",
 ]
 
-for pkg in ("webview", "uvicorn", "pystray"):
+for pkg in (
+    "webview",
+    "uvicorn",
+    "pystray",
+    "fastapi",
+    "starlette",
+    "anyio",
+    "httpx",
+    "httpcore",
+    "msal",
+    "bs4",
+    "pydantic",
+):
     pkg_datas, pkg_binaries, pkg_hidden = collect_all(pkg)
     datas += pkg_datas
     binaries += pkg_binaries

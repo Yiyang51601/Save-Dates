@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from save_dates import db
 from save_dates.config import (
+    DEFAULT_GRAPH_CLIENT_ID,
     DEFAULT_MAX_EMAILS,
     DEFAULT_SCAN_DAYS,
     HOST,
@@ -71,8 +72,14 @@ def _parse_iso(value: str) -> datetime:
     return ensure_aware(dt, local_tz())
 
 
+def _public_settings() -> dict:
+    settings = dict(db.get_settings())
+    settings["has_bundled_graph_client"] = bool(DEFAULT_GRAPH_CLIENT_ID.strip())
+    return settings
+
+
 def _snap_payload(snap, extra: dict | None = None) -> dict:
-    settings = db.get_settings()
+    settings = _public_settings()
     lang = settings.get("lang") or "zh"
     payload = {
         "connected": snap.connected,
@@ -504,7 +511,16 @@ def api_batch(req: BatchRequest) -> dict:
 
 @app.get("/api/settings")
 def api_get_settings() -> dict:
-    return db.get_settings()
+    return _public_settings()
+
+
+@app.post("/api/desktop/show")
+def api_desktop_show() -> dict:
+    from save_dates.window_control import request_show
+
+    if request_show():
+        return {"ok": True}
+    raise HTTPException(status_code=404, detail="no_desktop_window")
 
 
 @app.put("/api/settings")

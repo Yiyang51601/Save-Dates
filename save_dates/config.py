@@ -47,7 +47,9 @@ GRAPH_STATE_PATH = DATA_DIR / "graph_state.json"
 GRAPH_ID_PREFIX = "graph:"
 GRAPH_SCOPES = ("User.Read", "Mail.Read", "Mail.ReadWrite", "Calendars.ReadWrite")
 GRAPH_AUTHORITY = "https://login.microsoftonline.com/common"
-# Public client ID is optional until the user registers a Microsoft Graph app.
+# Developer-owned public client. Friends never register Entra apps.
+# Paste the Application (client) ID here after you register once; leave empty
+# until then. New Outlook sign-in stays advanced if this is blank.
 DEFAULT_GRAPH_CLIENT_ID = ""
 
 CATEGORY_NAME = "Save Dates"

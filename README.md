@@ -16,15 +16,13 @@
 
 ## 你需要准备什么
 
-- Windows 上的 **Outlook**，已登录邮箱。两种都可以：
-  - **经典 Outlook**（`outlook.exe`）：打开并保持运行即可
-  - **新 Outlook**（`olk.exe`）：在 Save Dates 里登录 Microsoft 账号（没有经典 COM 接口，走 Microsoft Graph）
+给朋友：**打开经典 Outlook**（`outlook.exe`）并保持运行即可。不用登记 Entra，也不用填应用程序 ID。
+
 - 也可以两个都装：日常用新 Outlook，让经典 Outlook 在后台开着
+- **新 Outlook**（`olk.exe`）是进阶选项：开发者先登记一次公共客户端，把 ID 写进 `DEFAULT_GRAPH_CLIENT_ID`，朋友只点「登录 Microsoft」
 - 若用 `run.bat`，需要 Python 3.10+；若用打包好的 `SaveDates.exe`，不需要再装 Python
 
 第一次扫描时，Outlook 可能会弹出“有程序正在访问邮箱”，请选择允许。
-
-新 Outlook / Graph：在 Entra 登记一个**公共客户端**，重定向 `http://localhost`，权限勾选 `Mail.Read`、`Mail.ReadWrite`、`Calendars.ReadWrite`。把应用程序（客户端）ID 填进设置后再登录。
 
 ## 怎么用
 

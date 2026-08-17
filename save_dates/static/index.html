@@ -29,16 +29,15 @@
     <p class="status-meta" id="statusMeta"></p>
 
     <div class="settings-panel hidden" id="settingsPanel">
+      <p class="settings-hint" data-i18n="classicHint"></p>
       <label class="lang-box">
         <span data-i18n="backend"></span>
         <select id="backendSelect">
-          <option value="auto" data-i18n="backendAuto">自动</option>
+          <option value="auto" data-i18n="backendAuto">自动（优先经典 Outlook）</option>
           <option value="classic" data-i18n="backendClassic">经典 Outlook</option>
-          <option value="graph" data-i18n="backendGraph">新 Outlook</option>
+          <option value="graph" data-i18n="backendGraph">新 Outlook（进阶）</option>
         </select>
       </label>
-      <button class="ghost small" id="msLoginBtn" type="button" data-i18n="loginMs"></button>
-      <button class="ghost small hidden" id="msLogoutBtn" type="button" data-i18n="logoutMs"></button>
       <label>
         <span data-i18n="recent"></span>
         <input id="days" type="number" min="1" max="90" value="14" />
@@ -53,17 +52,25 @@
         <input id="includeProcessed" type="checkbox" />
         <span data-i18n="includeProcessed"></span>
       </label>
-      <div class="graph-setup hidden" id="graphSetup">
-        <p data-i18n="graphHelp"></p>
-        <label>
-          <span data-i18n="graphClientId"></span>
-          <input id="graphClientId" spellcheck="false" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
-        </label>
+      <details class="advanced-box" id="advancedBox">
+        <summary data-i18n="advancedNewOutlook">进阶 · 仅新 Outlook</summary>
+        <p class="advanced-help" data-i18n="advancedHelp"></p>
         <div class="tool-row">
-          <button class="primary small" id="saveClientId" type="button" data-i18n="saveClientId"></button>
-          <a class="help-link" href="https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener" data-i18n="openEntra"></a>
+          <button class="ghost small" id="msLoginBtn" type="button" data-i18n="loginMs"></button>
+          <button class="ghost small hidden" id="msLogoutBtn" type="button" data-i18n="logoutMs"></button>
         </div>
-      </div>
+        <div class="graph-setup hidden" id="graphSetup">
+          <p data-i18n="graphHelp"></p>
+          <label>
+            <span data-i18n="graphClientId"></span>
+            <input id="graphClientId" spellcheck="false" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+          </label>
+          <div class="tool-row">
+            <button class="primary small" id="saveClientId" type="button" data-i18n="saveClientId"></button>
+            <a class="help-link" href="https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade" target="_blank" rel="noopener" data-i18n="openEntra"></a>
+          </div>
+        </div>
+      </details>
     </div>
 
     <section class="toolbar">

@@ -129,8 +129,30 @@ body[data-lang="en"] .card h2 {
   border-radius: 16px;
   padding: 12px 14px;
 }
+.settings-hint,
+.advanced-help {
+  width: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.advanced-box {
+  width: 100%;
+  color: var(--muted);
+  font-size: 13px;
+}
+.advanced-box summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--ink);
+}
+.advanced-box[open] summary {
+  margin-bottom: 8px;
+}
 .graph-setup {
   width: 100%;
+  margin-top: 10px;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
