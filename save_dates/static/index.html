@@ -15,7 +15,7 @@
         <p class="lede" data-i18n="lede"></p>
       </div>
       <div class="header-tools">
-        <div class="status-pill" id="statusCard">
+        <div class="status-pill" id="statusCard" role="status">
           <div class="status-dot" id="statusDot"></div>
           <strong id="statusTitle"></strong>
         </div>
@@ -108,6 +108,23 @@
 
     <main id="list" class="list"></main>
     <p class="empty" id="empty" data-i18n="empty"></p>
+  </div>
+  <div class="modal-overlay hidden" id="connectPicker" role="dialog" aria-modal="true" aria-labelledby="connectPickerTitle">
+    <div class="modal" role="document">
+      <h2 id="connectPickerTitle" data-i18n="connectPickerTitle"></h2>
+      <p class="modal-lede" data-i18n="connectPickerLede"></p>
+      <div class="connect-choices">
+        <button type="button" class="connect-choice" id="pickClassic">
+          <strong data-i18n="pickClassicTitle"></strong>
+          <span data-i18n="pickClassicHelp"></span>
+        </button>
+        <button type="button" class="connect-choice" id="pickGraph">
+          <strong data-i18n="pickGraphTitle"></strong>
+          <span data-i18n="pickGraphHelp"></span>
+        </button>
+      </div>
+      <button type="button" class="ghost small" id="connectPickerLater" data-i18n="connectPickerLater"></button>
+    </div>
   </div>
   <script src="/static/app.js"></script>
 </body>

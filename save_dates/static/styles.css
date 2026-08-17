@@ -71,6 +71,14 @@ body[data-lang="en"] .card h2 {
   font-size: 13px;
 }
 .status-pill strong { font-weight: 600; }
+.status-pill.pickable {
+  cursor: pointer;
+}
+.status-pill.pickable:hover,
+.status-pill.pickable:focus {
+  outline: none;
+  border-color: var(--red);
+}
 .status-meta {
   margin: 8px 0 0;
   color: var(--muted);
@@ -317,6 +325,71 @@ body[data-lang="en"] .card h2 {
 .banner span { flex: 1; }
 .banner.error { background: #fde8e4; border-color: #efc2b8; color: #7a2a1c; }
 .hidden { display: none !important; }
+
+body.modal-open { overflow: hidden; }
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(28, 25, 21, 0.38);
+}
+.modal {
+  width: min(440px, 100%);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  padding: 22px 20px 16px;
+}
+.modal h2 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: -0.03em;
+}
+.modal-lede {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.connect-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 16px 0 12px;
+}
+.connect-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: #fffaf2;
+  padding: 12px 14px;
+  color: inherit;
+}
+.connect-choice:hover,
+.connect-choice:focus {
+  border-color: var(--green);
+  background: #f4f8f4;
+}
+.connect-choice strong {
+  font-size: 15px;
+}
+.connect-choice span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+  font-weight: 400;
+}
+#connectPickerLater { display: block; margin: 0 auto; }
 
 label { color: var(--muted); font-size: 14px; }
 label input[type="number"] {

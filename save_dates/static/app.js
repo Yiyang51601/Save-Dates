@@ -10,7 +10,17 @@ const STRINGS = {
     backendAuto: "自动（优先经典 Outlook）",
     backendClassic: "经典 Outlook",
     backendGraph: "新 Outlook（进阶）",
-    classicHint: "给朋友：打开经典 Outlook（outlook.exe）并保持运行即可。新 Outlook 用户在进阶里点「登录 Microsoft」，不用填应用 ID。",
+    classicHint: "未连接时点红色「未连接」可选经典 Outlook 或登录 Microsoft。选过一次就会记住。",
+    connectPickerTitle: "选择邮箱连接方式",
+    connectPickerLede: "请选一种。选完后会记住，不会反复弹出。",
+    pickClassicTitle: "经典 Outlook",
+    pickClassicHelp: "打开 outlook.exe 并保持运行。软件通过 COM 读取邮件。",
+    pickGraphTitle: "新 Outlook / 登录 Microsoft",
+    pickGraphHelp: "用 Microsoft 账号登录。不用填写应用 ID。",
+    connectPickerLater: "稍后再说",
+    pickingClassic: "已选择经典 Outlook。请打开 outlook.exe 并保持运行。",
+    offlinePickHint: "未连接。点击此处选择经典 Outlook，或登录 Microsoft。",
+    choose_connection: "未连接。点击此处选择经典 Outlook，或登录 Microsoft。",
     advancedNewOutlook: "进阶 · 仅新 Outlook",
     advancedHelp: "只有不用经典 Outlook、只开新 Outlook 时，才点下面登录 Microsoft。不用填写应用 ID。",
     loginMs: "登录 Microsoft",
@@ -24,7 +34,7 @@ const STRINGS = {
     graphHelp: "软件已内置公共客户端 ID，朋友直接点「登录 Microsoft」即可。仅本地调试才需要覆盖。",
     liveTitleGraph: "实时同步 · {account}",
     liveMetaGraph: "新 Outlook / Microsoft 365 · 时区 {timezone}",
-    new_outlook_detected: "现在开着的是新 Outlook。请再打开经典 Outlook（开始菜单搜 Outlook）并保持运行。一般不用登录 Microsoft。",
+    new_outlook_detected: "检测到新 Outlook。请选择经典 Outlook，或登录 Microsoft。",
     graph_login_needed: "请登录 Microsoft 账号以连接新 Outlook。",
     graph_client_id_missing: "还没有可用的 Microsoft 应用 ID。请改用经典 Outlook，或在下方填写本地覆盖 ID。",
     graph_auth_failed: "Microsoft 登录失败。",
@@ -82,7 +92,7 @@ const STRINGS = {
     liveMeta: "{timezone}",
     connectedTitle: "已连接 {account}",
     connectedMeta: "{timezone}",
-    offlineMeta: "请打开经典 Outlook（outlook.exe）并保持运行",
+    offlineMeta: "请打开经典 Outlook（outlook.exe）并保持运行，或点击状态栏选择登录 Microsoft",
     serviceDown: "服务未就绪",
     month: "{n}月",
     weekdays: ["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
@@ -124,7 +134,17 @@ const STRINGS = {
     backendAuto: "Auto (Classic Outlook first)",
     backendClassic: "Classic Outlook",
     backendGraph: "New Outlook (advanced)",
-    classicHint: "For friends: open Classic Outlook (outlook.exe) and leave it running. New Outlook users click Sign in under Advanced — no Application ID to type.",
+    classicHint: "When offline, click the red Offline pill to choose Classic Outlook or Microsoft sign-in. We remember the choice.",
+    connectPickerTitle: "How do you want to connect?",
+    connectPickerLede: "Pick one. We’ll remember it and won’t keep asking.",
+    pickClassicTitle: "Classic Outlook",
+    pickClassicHelp: "Open outlook.exe and leave it running. Save Dates talks to it over COM.",
+    pickGraphTitle: "New Outlook / Sign in to Microsoft",
+    pickGraphHelp: "Sign in with your Microsoft account. You do not type an Application ID.",
+    connectPickerLater: "Not now",
+    pickingClassic: "Classic Outlook selected. Open outlook.exe and leave it running.",
+    offlinePickHint: "Not connected. Click here to choose Classic Outlook or Microsoft sign-in.",
+    choose_connection: "Not connected. Click here to choose Classic Outlook or Microsoft sign-in.",
     advancedNewOutlook: "Advanced · New Outlook only",
     advancedHelp: "Use this only if you do not have Classic Outlook. Click Sign in to Microsoft. You do not type an Application ID.",
     loginMs: "Sign in to Microsoft",
@@ -138,7 +158,7 @@ const STRINGS = {
     graphHelp: "The app already ships a public client ID. Friends just click Sign in. Override this only for local debugging.",
     liveTitleGraph: "Live sync · {account}",
     liveMetaGraph: "New Outlook / Microsoft 365 · {timezone}",
-    new_outlook_detected: "New Outlook is running. Open Classic Outlook from the Start menu and leave it running. You usually do not need to sign in with Microsoft.",
+    new_outlook_detected: "New Outlook is running. Choose Classic Outlook, or sign in with Microsoft.",
     graph_login_needed: "Sign in with Microsoft to connect New Outlook.",
     graph_client_id_missing: "No Microsoft app ID is available. Use Classic Outlook, or enter a local override below.",
     graph_auth_failed: "Microsoft sign-in failed.",
@@ -189,7 +209,7 @@ const STRINGS = {
     connectedTitle: "Connected · {account}",
     connectedMeta: "{timezone}",
     offlineTitle: "Offline",
-    offlineMeta: "Open Classic Outlook (outlook.exe) and leave it running.",
+    offlineMeta: "Open Classic Outlook (outlook.exe) and leave it running, or click the status pill to sign in with Microsoft.",
     serviceDown: "Service not ready",
     allDay: "All day",
     around: "Around",
@@ -244,6 +264,7 @@ let lastSearchItems = [];
 let lastSearchMeta = { scanned: 0, live: false };
 let searchTimer = 0;
 let searchSeq = 0;
+let connectPickerAutoShown = false;
 
 function t(key, vars = {}) {
   const table = STRINGS[lang] || STRINGS.zh;
@@ -429,7 +450,20 @@ function applyStatus(s) {
     $("statusMeta").textContent = s.error ? translateError(s.error) : t("connectedMeta", { timezone: s.timezone || "" });
   } else {
     $("statusTitle").textContent = t("offlineTitle");
-    $("statusMeta").textContent = translateError(s.error) || t("offlineMeta");
+    const pref = s.settings?.backend || "auto";
+    if (pref === "auto") {
+      $("statusMeta").textContent = t("offlinePickHint");
+    } else {
+      $("statusMeta").textContent = translateError(s.error) || t("offlineMeta");
+    }
+  }
+  const pill = $("statusCard");
+  if (pill) {
+    const pickable = !s.connected;
+    pill.classList.toggle("pickable", pickable);
+    pill.setAttribute("role", pickable ? "button" : "status");
+    pill.tabIndex = pickable ? 0 : -1;
+    pill.setAttribute("aria-haspopup", pickable ? "dialog" : "false");
   }
   setCounts(s.counts);
   if (s.settings?.backend) $("backendSelect").value = s.settings.backend;
@@ -448,6 +482,74 @@ function applyStatus(s) {
     $("advancedBox").open = true;
     $("graphSetup").open = true;
   } else if (s.settings?.backend === "graph") {
+    $("advancedBox").open = true;
+  }
+  maybeOfferConnectPicker(s);
+}
+
+function maybeOfferConnectPicker(s, force = false) {
+  const overlay = $("connectPicker");
+  if (!overlay) return;
+  if (!s || s.connected) {
+    hideConnectPicker();
+    if (s?.connected) connectPickerAutoShown = false;
+    return;
+  }
+  if (force) {
+    connectPickerAutoShown = true;
+    showConnectPicker();
+    return;
+  }
+  if (!overlay.classList.contains("hidden")) return;
+  if (connectPickerAutoShown) return;
+  const pref = s.settings?.backend || "auto";
+  if (pref !== "auto") return;
+  connectPickerAutoShown = true;
+  showConnectPicker();
+}
+
+function showConnectPicker() {
+  const overlay = $("connectPicker");
+  if (!overlay) return;
+  overlay.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  const first = $("pickClassic");
+  if (first) first.focus();
+}
+
+function hideConnectPicker() {
+  const overlay = $("connectPicker");
+  if (!overlay) return;
+  overlay.classList.add("hidden");
+  document.body.classList.remove("modal-open");
+}
+
+function openConnectPickerFromStatus() {
+  if (!lastStatus || lastStatus.connected) return;
+  maybeOfferConnectPicker(lastStatus, true);
+}
+
+async function chooseClassicOutlook() {
+  hideConnectPicker();
+  try {
+    await api("/api/settings", { method: "PUT", body: JSON.stringify({ backend: "classic" }) });
+    setBanner(t("pickingClassic"));
+    await refreshStatus();
+  } catch (err) {
+    setBanner(err.message, true);
+  }
+}
+
+async function chooseGraphOutlook() {
+  hideConnectPicker();
+  setBanner(t("loggingIn"));
+  try {
+    await api("/api/settings", { method: "PUT", body: JSON.stringify({ backend: "graph" }) });
+    const status = await api("/api/microsoft/login", { method: "POST" });
+    applyStatus(status);
+    setBanner(status.connected ? t("msConnected") : "");
+  } catch (err) {
+    setBanner(err.message, true);
     $("advancedBox").open = true;
   }
 }
@@ -977,6 +1079,11 @@ $("undoBtn").addEventListener("click", async () => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("connectPicker")?.classList.contains("hidden")) {
+    event.preventDefault();
+    hideConnectPicker();
+    return;
+  }
   if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z") return;
   if (editingNow()) return;
   if ($("undoBtn")?.classList.contains("hidden")) return;
@@ -1022,6 +1129,32 @@ $("backendSelect").addEventListener("change", async (event) => {
   } catch (err) {
     setBanner(err.message, true);
   }
+});
+
+$("statusCard").addEventListener("click", () => {
+  openConnectPickerFromStatus();
+});
+
+$("statusCard").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  openConnectPickerFromStatus();
+});
+
+$("pickClassic").addEventListener("click", () => {
+  chooseClassicOutlook();
+});
+
+$("pickGraph").addEventListener("click", () => {
+  chooseGraphOutlook();
+});
+
+$("connectPickerLater").addEventListener("click", () => {
+  hideConnectPicker();
+});
+
+$("connectPicker").addEventListener("click", (event) => {
+  if (event.target === $("connectPicker")) hideConnectPicker();
 });
 
 $("msLoginBtn").addEventListener("click", async () => {

@@ -10,6 +10,9 @@ def test_home_and_static():
         home = client.get("/")
         assert home.status_code == 200
         assert "Save Dates" in home.text
+        assert "connectPicker" in home.text
+        assert "pickClassic" in home.text
+        assert "pickGraph" in home.text
         assert "进阶 · 仅新 Outlook" in home.text
         assert "经典 Outlook" in home.text
         assert "mailSearch" in home.text
@@ -20,6 +23,10 @@ def test_home_and_static():
         assert js.status_code == 200
         assert "搜邮件里的活动" in js.text
         assert "Search mail for events" in js.text
+        assert "选择邮箱连接方式" in js.text
+        assert "How do you want to connect?" in js.text
+        assert "You do not type an Application ID" in js.text
+        assert "connectPickerAutoShown" in js.text
 
 
 def test_status_and_demo_review_flow():
@@ -84,6 +91,15 @@ def test_backend_setting_roundtrip():
         assert settings["backend"] == "graph"
         assert settings["has_bundled_graph_client"] is True
         client.put("/api/settings", json={"backend": "auto"})
+
+
+def test_auto_backend_asks_user_to_choose_connection():
+    from save_dates.watcher import _disconnected_error
+
+    assert _disconnected_error("auto", "outlook_not_running", "", False, False, True) == "choose_connection"
+    assert _disconnected_error("auto", "", "", False, False, False) == "choose_connection"
+    assert _disconnected_error("classic", "", "", False, False, True) == "outlook_not_running"
+    assert _disconnected_error("graph", "", "", False, False, True) == "graph_login_needed"
 
 
 def test_desktop_show_without_window_is_404():

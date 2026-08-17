@@ -542,18 +542,16 @@ def _disconnected_error(
     classic_error: str,
     graph_error: str,
     graph_logged_in: bool,
-    classic_running: bool,
-    new_running: bool,
+    _classic_running: bool,
+    _new_running: bool,
 ) -> str:
     if pref == "graph":
         return graph_error or ("graph_login_needed" if not graph_logged_in else "graph_request_failed")
     if pref == "classic":
         return classic_error or "outlook_not_running"
-    if new_running and not classic_running:
-        if graph_error in {"graph_client_id_missing", "graph_auth_failed", "graph_auth_cancelled"}:
-            return graph_error
-        return "new_outlook_detected"
-    return classic_error or graph_error or "outlook_not_running"
+    if graph_error in {"graph_client_id_missing", "graph_auth_failed", "graph_auth_cancelled"}:
+        return graph_error
+    return "choose_connection"
 
 
 watcher = MailboxHub()
