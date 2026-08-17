@@ -11,3 +11,4 @@ data/
 build/
 dist/
 *.zip
+assets/icon_preview.png

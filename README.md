@@ -28,10 +28,14 @@
 
 ## 怎么用
 
+在这台电脑上：桌面或开始菜单里的 **Save Dates**（红色日历加绿色对勾）。不要打开 `build\` 文件夹里的文件，那是打包中间产物，会报找不到 `python313.dll`。真正能运行的是 `dist\SaveDates\SaveDates.exe`，旁边必须留着 `_internal`。
+
+打包完成后也可双击 `install_shortcuts.bat`，把带图标的快捷方式装到桌面和开始菜单。
+
 ### 打包好的 Windows 应用（给朋友）
 
 1. 从 [Releases](https://github.com/Yiyang51601/Save-Dates/releases) 下载 `SaveDates-windows.zip`
-2. 解压后双击 `SaveDates.exe`
+2. 解压后双击 **`SaveDates` 文件夹里的** `SaveDates.exe`（`_internal` 必须留在旁边）
 3. 关掉窗口不会退出：程序进入托盘继续监听。右键托盘图标选 **退出** 才真正关掉
 
 ### 从源码运行
