@@ -328,3 +328,110 @@ def test_chinese_unlabeled_hall_is_location():
     event = _first("讲座通知", "将于2026年8月20日下午3点在大礼堂举办讲座，欢迎参加。")
     assert "礼堂" in event.location
     assert event.start.hour == 15
+
+
+ORIENTATION_HTML = """
+<html><body>
+<p>Alan Mooney, Executive Administrative Assistant</p>
+<p>Amy L. Rhodes</p>
+<p>Sent: Tuesday, July 21, 2026 10:20 AM</p>
+<p>Subject: Please Reply - Pitt Epidemiology Public Health</p>
+<p><span>时间：</span></p>
+<p><span>&nbsp;</span></p>
+<p>2026年8月20日（周四）</p>
+<p><span>地点：</span></p>
+<p><span>&nbsp;</span></p>
+<p>Public Health Building 5楼，A521/A522</p>
+<p><span>入口：</span></p>
+<p>建议从 Fifth Avenue 入口进（大雕塑正下方）</p>
+<p>要带：充满电的手机、平板或电脑</p>
+</body></html>
+"""
+
+
+def test_orientation_html_extracts_building_room_not_sent_clock():
+    from save_dates.extract import extract_location_notes
+
+    received = datetime(2026, 8, 17, 9, 0, tzinfo=TZ)
+    subject = "请回复 - 皮特流行病公共卫生部"
+    events = extract_events(subject, ORIENTATION_HTML, received, now=NOW, tz=TZ)
+    assert events
+    dates = {event.start.date().isoformat() for event in events}
+    assert "2026-08-20" in dates
+    assert "2026-08-18" not in dates
+    assert all(not (event.start.hour == 10 and event.start.minute == 20) for event in events)
+    location, notes = extract_location_notes(subject, ORIENTATION_HTML)
+    assert "Public Health Building" in location
+    assert "A521" in location
+    assert "5楼" in location or "5F" in location
+    assert "流行病学系" not in location
+    assert "Department" not in location
+    assert "入口" in notes or "Fifth Avenue" in notes
+    assert "要带" in notes or "手机" in notes
+    assert events[0].location == location
+
+
+def test_orientation_plain_blank_lines_after_labels():
+    body = (
+        "时间：\n\n2026年8月20日（周四）\n"
+        "地点：\n\nPublic Health Building 5楼，A521/A522\n"
+        "入口：\n\n建议从 Fifth Avenue 入口进（大雕塑正下方）\n"
+        "要带：充满电的手机、平板或电脑"
+    )
+    event = _first("更正-新生迎新", body)
+    assert event.start.day == 20
+    assert event.start.hour == 0
+    assert "Public Health Building" in event.location
+    assert "A521" in event.location
+    assert "Fifth Avenue" in event.notes
+    assert "手机" in event.notes
+
+
+def test_unlabeled_building_floor_and_room_code():
+    event = _first(
+        "Orientation",
+        "Please join us on August 20, 2026. Public Health Building 5F A521/A522.\n"
+        "Bring a charged laptop.",
+    )
+    assert event.start.day == 20
+    assert "Public Health Building" in event.location
+    assert "A521" in event.location
+    assert "5F" in event.location or "5楼" in event.location
+    assert "laptop" in event.notes.lower()
+
+
+def test_english_where_and_room_labels():
+    event = _first(
+        "Workshop",
+        "Workshop on August 21, 2026 at 2:00 PM\nWhere: Alumni Hall\nRoom: 200",
+    )
+    assert "Alumni Hall" in event.location
+    assert "200" in event.location
+
+
+def test_fullwidth_colon_location_label():
+    event = _first(
+        "讲座",
+        "时间\uff1a2026年8月22日\n地点\uff1aScience Hall 3楼 B301",
+    )
+    assert "Science Hall" in event.location
+    assert "B301" in event.location
+    assert "3楼" in event.location or "3F" in event.location
+
+
+def test_department_name_is_not_location():
+    event = _first(
+        "迎新",
+        "流行病学系将于2026年8月20日举办新生迎新。地点：Public Health Building A521/A522",
+    )
+    assert "Public Health Building" in event.location
+    assert "A521" in event.location
+    assert "流行病学系" not in event.location
+
+
+def test_zoom_still_used_when_mail_has_no_building():
+    event = _first(
+        "Seminar",
+        "Seminar on August 22, 2026 at 10:00 AM\nJoin Zoom: https://example.zoom.us/j/555",
+    )
+    assert "zoom.us" in event.location.lower()

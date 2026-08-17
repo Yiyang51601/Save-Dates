@@ -120,13 +120,21 @@ def html_to_text(raw: str) -> str:
         soup = BeautifulSoup(raw, "lxml")
         for tag in soup(["script", "style", "head"]):
             tag.decompose()
-        text = soup.get_text("\n")
+        for br in soup.find_all("br"):
+            br.replace_with("\n")
+        for tag in soup.find_all(["p", "div", "tr", "li", "h1", "h2", "h3", "h4", "blockquote", "hr", "table", "section"]):
+            tag.insert_before("\n")
+            tag.append("\n")
+        # Space between inline tags so 地点： / Location: stay one token.
+        text = soup.get_text(" ")
     else:
         text = raw
     text = html_lib.unescape(text)
     text = unicodedata.normalize("NFKC", text)
-    text = text.replace("\u00a0", " ")
+    text = text.replace("\u00a0", " ").replace("\u3000", " ")
     text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n[ \t]+", "\n", text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()[:BODY_CHAR_LIMIT]
 
@@ -160,7 +168,7 @@ _ONLINE_LOC = re.compile(
 )
 _DATEISH_LOC = re.compile(
     r"(?i)^\s*(?:\d{4}\s*年\s*)?\d{1,2}\s*月\s*\d{1,2}\s*[日号]?"
-    r"(?:\s*[（(]?星期?[一二三四五六日天][)）]?)?"
+    r"(?:\s*[（(]?(?:星期|周|週)?[一二三四五六日天][)）]?)?"
     r"|\d{4}[-/.]\d{1,2}[-/.]\d{1,2}"
     r"|(?:mon|tues?|wed|thurs?|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
     r"|(?:january|february|march|april|may|june|july|august|september|october|november|december)"
@@ -168,7 +176,11 @@ _DATEISH_LOC = re.compile(
 _EN_PLACE_NOUN = (
     r"Hall|Building|Center|Centre|Auditorium|Theatre|Theater|Library|"
     r"Lab|Laboratory|Room|Classroom|Lounge|Quad|Stadium|Office|"
-    r"Chapel|Gym|Gymnasium|Ballroom|Pavilion|Annex"
+    r"Chapel|Gym|Gymnasium|Ballroom|Pavilion|Annex|Tower|Wing"
+)
+_EN_NAMED_PLACE = re.compile(
+    r"\b((?:[A-Z][\w.'\-]+(?:\s+(?:and|&|of|the|for|at)\s+[A-Z][\w.'\-]+|\s+[A-Z][\w.'\-]+){0,5})\s+"
+    r"(?:" + _EN_PLACE_NOUN + r"))\b"
 )
 _EN_AT_PLACE = re.compile(
     r"(?i)\b(?:in|at|@)\s+(?!the\s+(?:email|message|meantime|morning|afternoon|evening)\b)"
@@ -183,15 +195,45 @@ _CN_AT_PLACE = re.compile(
     r"(?:礼堂|大厅|教室|会议室|报告厅|中心|大楼|大厦|图书馆|办公楼|馆|厅))"
 )
 _FLOOR_TOKEN = re.compile(
-    r"(?<!\d)(\d{1,2})\s*楼|(?:floor|level)\s*(\d{1,2})",
+    r"(?<![A-Za-z0-9])(\d{1,2})\s*(?:楼|F\b)|"
+    r"(\d{1,2})(?:st|nd|rd|th)\s+floors?|"
+    r"(?:floor|level)\s*(\d{1,2})",
     re.I,
 )
 _ROOM_CODE = re.compile(r"\b([A-Z]\d{2,4}(?:\s*/\s*[A-Z]?\d{2,4})+)\b")
-_EN_ROOM = re.compile(r"(?i)\b(?:room|rm\.?)\s*([A-Za-z]?\d{2,5}(?:\s*/\s*[A-Za-z]?\d{2,5})*)")
+_ROOM_SOLO = re.compile(r"\b([A-Z]\d{3,4})\b")
+_EN_ROOM = re.compile(r"(?i)\b(?:rooms?|rm\.?)\s*([A-Za-z]?\d{2,5}(?:\s*/\s*[A-Za-z]?\d{2,5})*)")
 _CN_ROOM = re.compile(r"(?:教室|会议室|室)\s*([A-Za-z]?\d{2,5}(?:\s*/\s*[A-Za-z]?\d{2,5})*)")
+_VENUE_HINT = re.compile(
+    r"(?i)building|hall|auditorium|theatre|theater|library|classroom|center|centre|"
+    r"stadium|pavilion|annex|tower|\broom\b|zoom\.|teams\.|meet\.google|"
+    r"礼堂|大厅|教室|会议室|报告厅|大楼|大厦|图书馆|办公楼|[A-Z]\d{2,4}|\d{1,2}\s*(?:楼|F\b)"
+)
+_ORG_HINT = re.compile(
+    r"(?i)(?:department|dept\.?|school|college|division|office)\s+of\b|"
+    r"\b(?:department|dept\.?|school|college|division)\b|"
+    r"学系|[\u4e00-\u9fff]{1,16}(?:系|学部|学院|部)$"
+)
+_PLACE_HINT = re.compile(
+    r"(?i)building|hall|auditorium|theatre|theater|library|room|classroom|"
+    r"center|centre|stadium|lab\b|lounge|quad|office|chapel|gym|"
+    r"楼|室|礼堂|教室|报告厅|大厅|大厦|图书馆"
+)
 _NOTE_LOOSE = re.compile(
     r"(?i)((?:please\s+)?(?:bring|rsvp\b|enter(?:\s+via)?|park(?:ing)?(?:\s+at)?|"
     r"wear|dress(?:\s+code)?)\s*[^\n。.]{3,72})"
+)
+_HEADER_LINE = re.compile(
+    r"(?im)^[ \t]*(?:from|sent(?:\s+on)?|to|cc|bcc|subject|received|reply-to|"
+    r"发件人|发送时间|发件时间|收件人|抄送|主题|发送于)\s*[:：].*$"
+)
+_STAMP_AFTER_DATE = re.compile(
+    r"(?i)(?:\s*[（(]?(?:星期|周|週)?[一二三四五六日天][)）]?)?"
+    r"(?:\s*(?:凌晨|早上|早晨|上午|中午|下午|傍晚|晚上|,?\s*at|@))?"
+    r"(?:\s*\d{1,2}\s*[:：时点.]\s*\d{2}\s*(?:am|pm|a\.m\.|p\.m\.)?)?"
+)
+_STAMP_BEFORE_DATE = re.compile(
+    r"(?i)(?:mon|tues?|wednes|wed|thurs?|thu|fri|sat|sun)[a-z]*\s*,\s*$"
 )
 _NOTE_LINE_MAX = 80
 _CLAUSE_SPLIT = re.compile(r"[。！？!?\n]|[；;]")
@@ -221,7 +263,9 @@ def _all_field_labels() -> tuple[str, ...]:
 
 
 _FIELD_LABEL_RE = re.compile(
-    r"(?i)(?P<label>" + "|".join(re.escape(label) for label in _all_field_labels()) + r")\s*[:：]"
+    r"(?i)(?:^|[\n\r;；。])\s*(?P<label>"
+    + "|".join(re.escape(label) for label in _all_field_labels())
+    + r")(?:\s*[:：]|(?<=[\u4e00-\u9fff])\s*(?=\n))"
 )
 
 
@@ -276,8 +320,54 @@ def _is_dateish(value: str) -> bool:
     return bool(_DATEISH_LOC.match(text)) and len(text) < 40
 
 
+def _is_org_name(value: str) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return False
+    if _PLACE_HINT.search(text) or _ROOM_CODE.search(text) or _ROOM_SOLO.search(text):
+        return False
+    return bool(_ORG_HINT.search(text))
+
+
+def _looks_like_venue(value: str) -> bool:
+    text = (value or "").strip()
+    if not text or _is_dateish(text) or _is_org_name(text):
+        return False
+    return bool(_VENUE_HINT.search(text) or _EN_NAMED_PLACE.search(text) or _ONLINE_LOC.match(text))
+
+
 def _norm_label(label: str) -> str:
     return re.sub(r"\s+", " ", (label or "").strip().lower())
+
+
+def _field_value(text: str, start: int, end: int) -> str:
+    chunk = (text or "")[start:end]
+    lines: list[str] = []
+    for raw_line in chunk.split("\n"):
+        line = raw_line.strip()
+        if not line:
+            if lines:
+                break
+            continue
+        lines.append(line)
+        if len(lines) >= 3:
+            break
+    if not lines:
+        return ""
+    value = lines[0]
+    for extra in lines[1:]:
+        if (
+            len(value) < 40
+            or _FLOOR_TOKEN.search(extra)
+            or _ROOM_CODE.search(extra)
+            or _ROOM_SOLO.search(extra)
+            or _EN_ROOM.search(extra)
+            or _CN_ROOM.search(extra)
+        ):
+            value = f"{value} {extra}".strip()
+        else:
+            break
+    return _clip_field(value, 160)
 
 
 def _labeled_fields(text: str) -> list[tuple[str, str]]:
@@ -285,12 +375,7 @@ def _labeled_fields(text: str) -> list[tuple[str, str]]:
     rows: list[tuple[str, str]] = []
     for index, match in enumerate(matches):
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        chunk = text[match.end() : end].split("\n\n")[0]
-        lines = [line.strip() for line in chunk.split("\n") if line.strip()]
-        value = lines[0] if lines else ""
-        if len(value) < 8 and len(lines) > 1:
-            value = f"{value} {lines[1]}".strip()
-        value = _clip_field(value, 160)
+        value = _field_value(text, match.end(), end)
         if value:
             rows.append((_norm_label(match["label"]), value))
     return rows
@@ -301,7 +386,7 @@ def _join_place(*parts: str) -> str:
     blob = ""
     for part in parts:
         piece = _clean_loc(part)
-        if not piece or _is_dateish(piece):
+        if not piece or _is_dateish(piece) or _is_org_name(piece):
             continue
         lowered = piece.casefold()
         if blob and lowered in blob.casefold():
@@ -326,32 +411,60 @@ def _meet_urls(text: str) -> list[str]:
     return urls
 
 
+def _format_floor(match: re.Match) -> str:
+    raw = re.sub(r"\s+", "", match.group(0))
+    if "楼" in raw:
+        return raw
+    if re.search(r"(?i)\d+F$", raw):
+        return raw.upper()
+    number = next((group for group in match.groups() if group), "")
+    return f"{number}F" if number else raw
+
+
+def _room_from(text: str) -> str:
+    labeled = _EN_ROOM.search(text or "") or _CN_ROOM.search(text or "")
+    if labeled:
+        return _clean_loc(labeled.group(0))
+    pair = _ROOM_CODE.search(text or "")
+    if pair:
+        return pair.group(1).replace(" ", "")
+    solo = _ROOM_SOLO.search(text or "")
+    if solo:
+        return solo.group(1)
+    return ""
+
+
+def _near_window(text: str, needle: str, radius: int = 96) -> str:
+    hay = text or ""
+    if not needle:
+        return hay[: radius * 2]
+    idx = fold_search(hay).find(fold_search(needle[:48]))
+    if idx < 0:
+        return hay
+    return hay[idx : min(len(hay), idx + max(len(needle), 8) + radius)]
+
+
 def _fallback_location(text: str) -> str:
+    named = _EN_NAMED_PLACE.search(text or "")
+    if named and not _is_org_name(named.group(1)):
+        return _clean_loc(named.group(1))
     en = _EN_AT_PLACE.search(text or "")
-    if en:
+    if en and not _is_org_name(en.group(1)):
         return _clean_loc(en.group(1))
     cn = _CN_AT_PLACE.search(text or "")
-    if cn:
+    if cn and not _is_org_name(cn.group(1)):
         return _clean_loc(cn.group(1))
     return ""
 
 
 def _extra_floor_room(text: str, location: str) -> str:
     blob = location or ""
+    window = _near_window(text or "", blob) if blob else (text or "")
     floor = ""
-    room = ""
-    floor_match = _FLOOR_TOKEN.search(text or "")
+    floor_match = _FLOOR_TOKEN.search(window) or (_FLOOR_TOKEN.search(text or "") if blob else None)
     if floor_match:
-        number = floor_match.group(1) or floor_match.group(2)
-        token = floor_match.group(0)
-        floor = token if "楼" in token else f"Floor {number}"
-    room_match = _EN_ROOM.search(text or "") or _CN_ROOM.search(text or "")
-    if room_match:
-        room = _clean_loc(room_match.group(0))
-    else:
-        code = _ROOM_CODE.search(text or "")
-        if code:
-            room = code.group(1)
+        floor = _format_floor(floor_match)
+    room = _room_from(window) or (_room_from(text or "") if blob else "")
     return _join_place(blob, floor, room)
 
 
@@ -391,13 +504,15 @@ def extract_location_notes(subject: str, body: str) -> tuple[str, str]:
         if label in skip_labels:
             continue
         if label in loc_labels:
+            if _is_org_name(value):
+                continue
             if label in {"building", "大楼", "大厦"}:
                 building = building or value
             elif label in {"room", "教室", "会议室", "室", "hall"}:
                 room = room or value
             elif label in {"楼层", "楼"}:
                 floor = floor or value
-            else:
+            elif _looks_like_venue(value):
                 venue_parts.append(value)
             continue
         if label in note_labels:
@@ -698,6 +813,44 @@ def _safe_date(year: int, month: int, day: int, tz) -> datetime | None:
         return None
 
 
+_EN_MONTH_AFTER_DOW = re.compile(
+    r"(?i)\s*,?\s*(?:january|february|march|april|may|june|july|august|september|october|november|december|"
+    r"jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\.?\s+\d{1,2}"
+)
+_CN_DATE_BEFORE_DOW = re.compile(r"[日号]\s*$")
+
+
+def _expand_datetime_span(text: str, start: int, end: int) -> tuple[int, int]:
+    prefix = text[max(0, start - 18) : start]
+    lead = _STAMP_BEFORE_DATE.search(prefix)
+    if lead:
+        start = start - len(prefix) + lead.start()
+    tail = _STAMP_AFTER_DATE.match(text[end:])
+    if tail and tail.end():
+        end += tail.end()
+    return start, end
+
+
+def _line_at(text: str, pos: int) -> str:
+    lo = text.rfind("\n", 0, pos) + 1
+    hi = text.find("\n", pos)
+    if hi < 0:
+        hi = len(text)
+    return text[lo:hi]
+
+
+def _weekday_is_stamp(text: str, match: re.Match) -> bool:
+    """Skip weekdays that belong to a sent/received clock, not the event."""
+    if _HEADER_LINE.match(_line_at(text, match.start())):
+        return True
+    if _EN_MONTH_AFTER_DOW.match(text[match.end() :]):
+        return True
+    before = text[max(0, match.start() - 12) : match.start()]
+    if _CN_DATE_BEFORE_DOW.search(before):
+        return True
+    return False
+
+
 def extract_events(
     subject: str,
     body: str,
@@ -719,7 +872,7 @@ def extract_events(
         return any(not (b <= s or a >= e) for s, e in occupied)
 
     def consume(span: tuple[int, int]) -> None:
-        occupied.append(span)
+        occupied.append(_expand_datetime_span(text, span[0], span[1]))
 
     for m in _RANGE_CN.finditer(text):
         y = received_at.year
@@ -807,7 +960,7 @@ def extract_events(
         consume(m.span())
 
     for m in _CN_WEEK.finditer(text):
-        if overlaps(*m.span()):
+        if overlaps(*m.span()) or _weekday_is_stamp(text, m):
             continue
         weekday = CN_WEEKDAY[m["w"]]
         week = m["week"]
@@ -822,7 +975,7 @@ def extract_events(
         consume(m.span())
 
     for m in _EN_WEEK.finditer(text):
-        if overlaps(*m.span()):
+        if overlaps(*m.span()) or _weekday_is_stamp(text, m):
             continue
         weekday = EN_WEEKDAY[m["w"].lower()]
         week = (m["week"] or "").lower() or None
