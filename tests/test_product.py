@@ -40,6 +40,15 @@ def test_home_and_static():
         assert "detectSystemLang" in js.text
         assert "emptyHintSessionDone" in js.text
         assert "empty-hint-out" in js.text
+        assert "mailboxSelect" in home.text
+        assert "mailboxPick" in home.text
+        assert "mailboxSeg" not in home.text
+        assert "退出示例" in js.text
+        assert "Exit sample" in js.text
+        assert "demoExitBtn" in js.text
+        assert "exit_demo" in js.text
+        assert "全部邮箱" in js.text
+        assert "All mailboxes" in js.text
         assert "讲座通知" not in js.text
         assert "导师往来" not in js.text
         assert "advisor threads" not in js.text
@@ -57,6 +66,8 @@ def test_status_and_demo_review_flow():
         assert "counts" in body
         assert "timezone" in body
         assert "greeting" in body
+        assert "mailboxes" in body
+        assert isinstance(body["mailboxes"], list)
         assert body["greeting"]
 
         scan = client.post("/api/scan", json={"demo": True})
@@ -67,6 +78,7 @@ def test_status_and_demo_review_flow():
 
         listed = client.get("/api/candidates?status=pending")
         assert listed.status_code == 200
+        assert isinstance(listed.json()["mailboxes"], list)
         items = listed.json()["items"]
         assert items
         first = items[0]
@@ -247,6 +259,135 @@ def test_reject_and_accept_can_be_undone():
         restored = client.post(f"/api/candidates/{task['id']}/undo")
         assert restored.status_code == 200
         assert restored.json()["item"]["status"] == "pending"
+
+
+def test_demo_exit_clears_sample_mail():
+    with TestClient(app) as client:
+        scan = client.post("/api/scan", json={"demo": True})
+        assert scan.status_code == 200
+        assert scan.json()["demo"] is True
+        items = client.get("/api/candidates?status=pending").json()["items"]
+        assert items
+        assert any(str(item["email_id"]).startswith("demo-") for item in items)
+        boxes = {item.get("mailbox") for item in items if item.get("mailbox")}
+        assert "yuan@school.edu" in boxes
+        assert "yuan@personal.com" in boxes
+        exited = client.post("/api/scan", json={"exit_demo": True})
+        assert exited.status_code == 200
+        payload = exited.json()
+        assert payload["ok"] is True
+        assert payload["demo"] is False
+        leftover = client.get("/api/candidates?status=pending").json()["items"]
+        assert not any(str(item["email_id"]).startswith("demo-") for item in leftover)
+
+
+def test_list_mailboxes_refreshes_new_classic_stores():
+    from save_dates.outlook_client import list_mailboxes
+
+    class Store:
+        def __init__(self, sid, name):
+            self.StoreID = sid
+            self.DisplayName = name
+
+        def GetDefaultFolder(self, _kind):
+            return object()
+
+    class Account:
+        def __init__(self, store, smtp):
+            self.DeliveryStore = store
+            self.SmtpAddress = smtp
+            self.DisplayName = smtp
+
+    class Namespace:
+        def __init__(self, stores, accounts):
+            self.Stores = stores
+            self.Accounts = accounts
+
+    first = Store("s1", "School")
+    names = list_mailboxes(Namespace([first], [Account(first, "yuan@school.edu")]))
+    assert names == ["yuan@school.edu"]
+    second = Store("s2", "Personal")
+    names = list_mailboxes(
+        Namespace(
+            [first, second],
+            [Account(first, "yuan@school.edu"), Account(second, "yuan@personal.com")],
+        )
+    )
+    assert names == ["yuan@school.edu", "yuan@personal.com"]
+
+
+def test_graph_mailbox_list_follows_signed_in_account():
+    from save_dates.graph_runtime import GraphRuntime
+
+    runtime = GraphRuntime()
+    runtime._account = "first@outlook.com"
+    assert runtime.mailboxes() == ["first@outlook.com"]
+    runtime._account = "later@school.edu"
+    assert runtime.mailboxes() == ["later@school.edu"]
+
+
+def test_scan_inbox_keeps_all_store_mailboxes_when_email_cap_hits():
+    from datetime import datetime, timezone
+
+    from save_dates.outlook_client import scan_inbox_with_namespace
+
+    class Mail:
+        Class = 43
+        Subject = "hello"
+        SenderName = "A"
+        SenderEmailAddress = "a@x.com"
+        EntryID = "id-1"
+        Body = ""
+        ReceivedTime = datetime.now(timezone.utc)
+
+        class PropertyAccessor:
+            @staticmethod
+            def GetProperty(_name):
+                raise RuntimeError("no")
+
+        class Parent:
+            class Store:
+                StoreID = "s1"
+                DisplayName = "one@x.com"
+
+    class Items(list):
+        def Sort(self, *_args, **_kwargs):
+            return None
+
+    class Inbox:
+        def __init__(self, mails):
+            self.Items = Items(mails)
+
+    class Store:
+        def __init__(self, sid, inbox):
+            self.StoreID = sid
+            self.DisplayName = sid
+            self._inbox = inbox
+
+        def GetDefaultFolder(self, _kind):
+            return self._inbox
+
+    class Account:
+        def __init__(self, store, smtp):
+            self.DeliveryStore = store
+            self.SmtpAddress = smtp
+            self.DisplayName = smtp
+
+    class Namespace:
+        def __init__(self, stores, accounts):
+            self.Stores = stores
+            self.Accounts = accounts
+            self.CurrentUser = type("User", (), {"Name": "Yuan"})()
+
+    old = Store("old", Inbox([Mail() for _ in range(30)]))
+    new = Store("new", Inbox([]))
+    ns = Namespace(
+        [old, new],
+        [Account(old, "old@x.com"), Account(new, "new@x.com")],
+    )
+    result = scan_inbox_with_namespace(ns, days=14, max_emails=10)
+    assert result["mailboxes"] == ["old@x.com", "new@x.com"]
+    assert result["scanned"] == 10
 
 
 def test_demo_promo_can_be_cleared_locally():

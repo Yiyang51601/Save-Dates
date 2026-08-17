@@ -483,6 +483,25 @@ button:disabled { opacity: 0.5; cursor: wait; }
   gap: 8px;
   align-items: center;
 }
+.mailbox-pick {
+  min-width: 12rem;
+  max-width: min(22rem, 100%);
+}
+.mailbox-pick select {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 12px;
+}
+button.ghost.on {
+  background: var(--ink);
+  color: #f4efe6;
+  border-color: var(--ink);
+}
 .mailbox-tag {
   display: inline-block;
   margin-right: 4px;

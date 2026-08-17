@@ -67,6 +67,10 @@ class GraphRuntime:
             "logged_in": self._connected or has_cached_account(),
         }
 
+    def mailboxes(self) -> list[str]:
+        label = str(self._account or cached_account_label() or "").strip()
+        return [label] if label else []
+
     def login(self) -> dict[str, Any]:
         self._interactive = True
         try:
@@ -93,6 +97,8 @@ class GraphRuntime:
     def scan(self, days: int, max_emails: int, include_processed: bool) -> dict[str, Any]:
         with self._lock:
             token = acquire_token(False)
+            profile = get_profile(token)
+            self._set_state(True, True, profile["label"], "")
             added = 0
 
             def sink(items: list[dict[str, Any]]) -> None:
@@ -109,6 +115,7 @@ class GraphRuntime:
                 account=self._account,
             )
             result["added"] = added
+            result["mailboxes"] = self.mailboxes()
             if added:
                 self._notify(added)
             return result

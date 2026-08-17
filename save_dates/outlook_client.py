@@ -126,14 +126,7 @@ def mail_to_candidates(item: Any, now: datetime | None = None) -> tuple[str, lis
         list_unsubscribe = bool(item.PropertyAccessor.GetProperty(PR_LIST_UNSUBSCRIBE))
     except Exception:
         list_unsubscribe = False
-    store_id = ""
-    mailbox = ""
-    try:
-        store = item.Parent.Store
-        store_id = str(store.StoreID or "")
-        mailbox = str(store.DisplayName or "")
-    except Exception:
-        store_id = ""
+    store_id, mailbox = _mailbox_from_item(item)
 
     now = now or datetime.now(local_tz())
     events = extract_all(subject, body, received, now=now, list_unsubscribe=list_unsubscribe, sender=sender)
@@ -160,6 +153,22 @@ def mail_to_candidates(item: Any, now: datetime | None = None) -> tuple[str, lis
         for event in events
     ]
     return email_id, candidates
+
+
+def _mailbox_from_item(item: Any) -> tuple[str, str]:
+    store_id = ""
+    mailbox = ""
+    try:
+        store = item.Parent.Store
+        store_id = str(store.StoreID or "")
+        mailbox = str(store.DisplayName or "")
+        try:
+            mailbox = _mailbox_label(item.Session, store) or mailbox
+        except Exception:
+            pass
+    except Exception:
+        return "", mailbox
+    return store_id, mailbox
 
 
 def _mailbox_label(ns: Any, store: Any) -> str:
@@ -199,6 +208,15 @@ def _iter_inboxes(ns: Any):
             continue
 
 
+def list_mailboxes(ns: Any) -> list[str]:
+    names: list[str] = []
+    for _inbox, mailbox, _store_id in _iter_inboxes(ns):
+        label = str(mailbox or "").strip()
+        if label and label not in names:
+            names.append(label)
+    return names
+
+
 def scan_inbox_with_namespace(
     ns: Any,
     days: int = DEFAULT_SCAN_DAYS,
@@ -215,13 +233,11 @@ def scan_inbox_with_namespace(
     skipped_invite = 0
     skipped_processed = 0
     found = 0
-    mailboxes: list[str] = []
+    mailboxes = list_mailboxes(ns)
 
     for inbox, mailbox, _store_id in _iter_inboxes(ns):
         if scanned >= max_emails:
             break
-        if mailbox and mailbox not in mailboxes:
-            mailboxes.append(mailbox)
         try:
             items = inbox.Items
             items.Sort("[ReceivedTime]", True)

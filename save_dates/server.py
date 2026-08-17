@@ -50,6 +50,7 @@ class ScanRequest(BaseModel):
     max_emails: int = Field(default=DEFAULT_MAX_EMAILS, ge=10, le=200)
     include_processed: bool = False
     demo: bool = False
+    exit_demo: bool = False
 
 
 class CandidatePatch(BaseModel):
@@ -126,6 +127,7 @@ def _snap_payload(snap, extra: dict | None = None) -> dict:
         "timezone": str(local_tz()),
         "counts": db.counts(),
         "settings": settings,
+        "mailboxes": list(snap.mailboxes or []),
     }
     if extra:
         payload.update(extra)
@@ -160,6 +162,7 @@ def _demo_candidates(lang: str = "zh") -> list[dict]:
                 "fuzzy": False,
                 "kind": "event",
                 "task_type": "",
+                "mailbox": "yuan@school.edu",
             },
             {
                 "email_id": f"demo-{stamp}-2",
@@ -178,6 +181,7 @@ def _demo_candidates(lang: str = "zh") -> list[dict]:
                 "fuzzy": True,
                 "kind": "event",
                 "task_type": "",
+                "mailbox": "yuan@school.edu",
             },
             {
                 "email_id": f"demo-{stamp}-3",
@@ -234,6 +238,7 @@ def _demo_candidates(lang: str = "zh") -> list[dict]:
                 "fuzzy": False,
                 "kind": "event",
                 "task_type": "",
+                "mailbox": "yuan@school.edu",
             },
         ]
     return [
@@ -254,6 +259,7 @@ def _demo_candidates(lang: str = "zh") -> list[dict]:
             "fuzzy": False,
             "kind": "event",
             "task_type": "",
+            "mailbox": "yuan@school.edu",
         },
         {
             "email_id": f"demo-{stamp}-2",
@@ -272,6 +278,7 @@ def _demo_candidates(lang: str = "zh") -> list[dict]:
             "fuzzy": True,
             "kind": "event",
             "task_type": "",
+            "mailbox": "yuan@school.edu",
         },
         {
             "email_id": f"demo-{stamp}-3",
@@ -328,6 +335,7 @@ def _demo_candidates(lang: str = "zh") -> list[dict]:
             "fuzzy": False,
             "kind": "event",
             "task_type": "",
+            "mailbox": "yuan@school.edu",
         },
     ]
 
@@ -373,6 +381,17 @@ async def api_stream() -> StreamingResponse:
 
 @app.post("/api/scan")
 def api_scan(req: ScanRequest) -> dict:
+    if req.exit_demo:
+        removed = db.clear_pending_prefix("demo-")
+        return {
+            "ok": True,
+            "demo": False,
+            "exited": True,
+            "removed": removed,
+            "counts": db.counts(),
+            "mailboxes": list(watcher.snapshot().mailboxes or []),
+        }
+
     if req.demo:
         db.clear_pending_prefix("demo-")
         added = db.insert_candidates(_demo_candidates(db.get_settings()["lang"]))
@@ -385,12 +404,14 @@ def api_scan(req: ScanRequest) -> dict:
             "found": 2,
             "added": added,
             "counts": db.counts(),
+            "mailboxes": list(watcher.snapshot().mailboxes or []),
         }
 
     snap = watcher.snapshot()
     if not snap.connected:
         raise HTTPException(status_code=400, detail=snap.error or "outlook_not_connected")
 
+    db.clear_pending_prefix("demo-")
     try:
         result = watcher.scan(
             days=req.days,
@@ -409,6 +430,7 @@ def api_scan(req: ScanRequest) -> dict:
         "found": result["found"],
         "added": result["added"],
         "account": result.get("account", ""),
+        "mailboxes": list(result.get("mailboxes") or snap.mailboxes or []),
         "counts": db.counts(),
     }
 
@@ -419,7 +441,11 @@ def api_list(status: str = "pending") -> dict:
     if status not in allowed:
         raise HTTPException(status_code=400, detail="invalid_status")
     items = db.list_candidates(None if status == "all" else status, limit=PENDING_LIST_LIMIT)
-    return {"items": items, "counts": db.counts()}
+    return {
+        "items": items,
+        "counts": db.counts(),
+        "mailboxes": list(watcher.snapshot().mailboxes or []),
+    }
 
 
 @app.get("/api/search")

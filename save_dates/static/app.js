@@ -52,6 +52,7 @@ const STRINGS = {
     includeProcessed: "包含已处理邮件",
     scanBtn: "补扫",
     demoBtn: "示例",
+    demoExitBtn: "退出示例",
     searchPlaceholder: "搜邮件里的活动",
     searchHint: "输入任意关键词，中英文都能搜。点加入才会进日历。",
     searchSearching: "正在搜索最近邮件…",
@@ -69,6 +70,7 @@ const STRINGS = {
     laneTask: "待办",
     lanePromo: "广告",
     mailboxAll: "全部邮箱",
+    mailboxLabel: "邮箱",
     promoKind: "广告",
     acceptPromo: "清掉",
     addedPromo: "已移到 Outlook 垃圾箱。",
@@ -103,7 +105,8 @@ const STRINGS = {
     weekdays: ["周一", "周二", "周三", "周四", "周五", "周六", "周日"],
     scanning: "正在补扫历史邮件并识别日期，稍等片刻…",
     scanned: "扫描 {scanned} 封邮件，发现 {found} 项，新增待确认 {added} 条。已跳过 {skipped} 封会议邀请。",
-    demoLoaded: "已加载示例。用上面的「日程 / 待办 / 广告」切换。示例不能跳转 Outlook；真实邮件才可以。",
+    demoLoaded: "已加载示例。用上面的「日程 / 待办 / 广告」切换。点「退出示例」回到真实邮件。示例不能跳转 Outlook；真实邮件才可以。",
+    demoExited: "已退出示例，正在显示真实邮件。",
     addedCalendar: "已写入 Outlook 日历。",
     addedTask: "已记入 Outlook 任务。",
     addedTaskLocal: "已记下待办。Outlook 未连接或无法写入任务时，会先保存在这里。",
@@ -181,6 +184,7 @@ const STRINGS = {
     includeProcessed: "Include processed mail",
     scanBtn: "Scan",
     demoBtn: "Sample",
+    demoExitBtn: "Exit sample",
     searchPlaceholder: "Search mail for events",
     searchHint: "Type any keyword — Chinese and English both work. Nothing is added to the calendar until you confirm.",
     searchSearching: "Searching recent mail…",
@@ -197,7 +201,8 @@ const STRINGS = {
     laneEvent: "Calendar",
     laneTask: "Tasks",
     lanePromo: "Ads",
-    mailboxAll: "All inboxes",
+    mailboxAll: "All mailboxes",
+    mailboxLabel: "Mailbox",
     promoKind: "Ad",
     acceptPromo: "Junk",
     addedPromo: "Moved to Junk Email.",
@@ -234,7 +239,8 @@ const STRINGS = {
     weekdays: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
     scanning: "Scanning mail and extracting dates…",
     scanned: "Scanned {scanned} messages, found {found} items, added {added} to review. Skipped {skipped} meeting invites.",
-    demoLoaded: "Sample loaded. Use Calendar / Tasks / Ads above to switch. Samples cannot open Outlook; real messages can.",
+    demoLoaded: "Sample loaded. Use Calendar / Tasks / Ads above to switch. Click Exit sample to return to live mail. Samples cannot open Outlook; real messages can.",
+    demoExited: "Left sample. Showing live mail.",
     addedCalendar: "Added to the Outlook calendar.",
     addedTask: "Saved to Outlook Tasks.",
     addedTaskLocal: "Saved as a task here. Outlook was not connected or could not write a task.",
@@ -277,6 +283,8 @@ let lastItems = [];
 let lastStatus = null;
 let currentLane = "event";
 let currentMailbox = "";
+let liveMailboxes = [];
+let demoActive = false;
 let lastUndoIds = [];
 let lastSearchQuery = "";
 let lastSearchItems = [];
@@ -310,6 +318,7 @@ function applyI18n() {
   document.querySelectorAll("#langSeg [data-lang]").forEach((btn) => {
     btn.classList.toggle("on", btn.dataset.lang === lang);
   });
+  updateDemoButton();
   updateLaneButtons(lastItems);
   if (lastStatus) applyStatus(lastStatus);
   render(lastItems);
@@ -496,6 +505,10 @@ function applyStatus(s) {
   }
   $("msLoginBtn").classList.toggle("hidden", Boolean(s.graph_logged_in));
   $("msLogoutBtn").classList.toggle("hidden", !s.graph_logged_in);
+  if (Array.isArray(s.mailboxes)) {
+    liveMailboxes = s.mailboxes.filter(Boolean);
+    updateMailboxSelect(lastItems);
+  }
   const bundled = Boolean(s.settings?.has_bundled_graph_client);
   const savedId = Boolean(s.settings?.graph_client_id);
   const needId = !bundled && !savedId;
@@ -629,10 +642,20 @@ function taskTypeLabel(item) {
   return t("taskKind");
 }
 
+function isDemoItem(item) {
+  return String(item?.email_id || "").startsWith("demo-");
+}
+
+function sourceItems(items) {
+  const rows = items || [];
+  if (demoActive) return rows.filter(isDemoItem);
+  return rows.filter((item) => !isDemoItem(item));
+}
+
 function laneItems(items, lane) {
-  const rows = (items || []).filter((item) => {
-    if (currentMailbox && item.mailbox && item.mailbox !== currentMailbox) return false;
-    return true;
+  const rows = sourceItems(items).filter((item) => {
+    if (!currentMailbox) return true;
+    return (item.mailbox || "") === currentMailbox;
   });
   if (lane === "task") return rows.filter(isTask);
   if (lane === "promo") return rows.filter(isPromo);
@@ -652,27 +675,49 @@ function updateLaneButtons(items) {
   }
   eventBtn.classList.toggle("on", currentLane === "event");
   taskBtn.classList.toggle("on", currentLane === "task");
-  updateMailboxButtons(items);
+  updateMailboxSelect(items);
 }
 
-function updateMailboxButtons(items) {
-  const host = $("mailboxSeg");
-  if (!host) return;
-  const names = [...new Set((items || []).map((item) => item.mailbox).filter(Boolean))];
-  if (names.length < 2) {
+function mailboxNames(items) {
+  const names = [];
+  const add = (name) => {
+    const label = String(name || "").trim();
+    if (label && !names.includes(label)) names.push(label);
+  };
+  (liveMailboxes || []).forEach(add);
+  for (const item of sourceItems(items)) {
+    add(item.mailbox);
+  }
+  return names;
+}
+
+function updateDemoButton() {
+  const btn = $("demoBtn");
+  if (!btn) return;
+  btn.textContent = demoActive ? t("demoExitBtn") : t("demoBtn");
+  btn.classList.toggle("on", demoActive);
+  btn.setAttribute("aria-pressed", demoActive ? "true" : "false");
+}
+
+function updateMailboxSelect(items) {
+  const host = $("mailboxPick");
+  const sel = $("mailboxSelect");
+  if (!host || !sel) return;
+  const names = mailboxNames(items);
+  if (currentMailbox && !names.includes(currentMailbox)) currentMailbox = "";
+  if (!names.length) {
     host.classList.add("hidden");
-    host.innerHTML = "";
-    currentMailbox = "";
+    sel.innerHTML = "";
     return;
   }
   host.classList.remove("hidden");
-  const buttons = [`<button type="button" data-mailbox="" class="${currentMailbox ? "" : "on"}">${escapeHtml(t("mailboxAll"))}</button>`];
+  sel.setAttribute("aria-label", t("mailboxLabel"));
+  const opts = [`<option value="">${escapeHtml(t("mailboxAll"))}</option>`];
   for (const name of names) {
-    buttons.push(
-      `<button type="button" data-mailbox="${escapeHtml(name)}" class="${currentMailbox === name ? "on" : ""}">${escapeHtml(name)}</button>`
-    );
+    opts.push(`<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`);
   }
-  host.innerHTML = buttons.join("");
+  sel.innerHTML = opts.join("");
+  sel.value = currentMailbox;
 }
 
 function emptyHintKey() {
@@ -941,7 +986,13 @@ async function runMailSearch(query) {
 async function loadList() {
   const data = await api("/api/candidates?status=pending");
   listReady = true;
-  render(data.items || []);
+  if (Array.isArray(data.mailboxes)) {
+    liveMailboxes = data.mailboxes.filter(Boolean);
+  }
+  const items = data.items || [];
+  if (!demoActive && items.some(isDemoItem)) demoActive = true;
+  updateDemoButton();
+  render(items);
   setCounts(data.counts);
 }
 
@@ -989,6 +1040,9 @@ $("scanBtn").addEventListener("click", async () => {
       added: data.added,
       skipped: data.skipped_invite,
     }));
+    demoActive = false;
+    if (Array.isArray(data.mailboxes)) liveMailboxes = data.mailboxes.filter(Boolean);
+    updateDemoButton();
     await loadList();
     await refreshStatus();
   } catch (err) {
@@ -999,9 +1053,26 @@ $("scanBtn").addEventListener("click", async () => {
 });
 
 $("demoBtn").addEventListener("click", async () => {
-  await api("/api/scan", { method: "POST", body: JSON.stringify({ demo: true }) });
-  setBanner(t("demoLoaded"));
-  await loadList();
+  $("demoBtn").disabled = true;
+  try {
+    if (demoActive) {
+      const data = await api("/api/scan", { method: "POST", body: JSON.stringify({ exit_demo: true }) });
+      demoActive = false;
+      if (Array.isArray(data.mailboxes)) liveMailboxes = data.mailboxes.filter(Boolean);
+      setBanner(t("demoExited"));
+    } else {
+      await api("/api/scan", { method: "POST", body: JSON.stringify({ demo: true }) });
+      demoActive = true;
+      setBanner(t("demoLoaded"));
+    }
+    updateDemoButton();
+    await loadList();
+    await refreshStatus();
+  } catch (err) {
+    setBanner(err.message, true);
+  } finally {
+    $("demoBtn").disabled = false;
+  }
 });
 
 $("mailSearch").addEventListener("input", () => {
@@ -1169,10 +1240,8 @@ $("laneSeg").addEventListener("click", (event) => {
   render(lastItems);
 });
 
-$("mailboxSeg").addEventListener("click", (event) => {
-  const btn = event.target.closest("[data-mailbox]");
-  if (!btn) return;
-  currentMailbox = btn.dataset.mailbox || "";
+$("mailboxSelect").addEventListener("change", (event) => {
+  currentMailbox = event.target.value || "";
   render(lastItems);
 });
 

@@ -22,6 +22,7 @@ from save_dates.outlook_client import (
     create_task_with_app,
     delete_item_with_namespace,
     display_mail,
+    list_mailboxes,
     mail_to_candidates,
     move_mail_with_namespace,
     scan_inbox_with_namespace,
@@ -41,6 +42,7 @@ class WatchSnapshot:
     graph_logged_in: bool = False
     classic_running: bool = False
     new_outlook_running: bool = False
+    mailboxes: list[str] | None = None
 
 
 class _AppEvents:
@@ -79,6 +81,7 @@ class OutlookRuntime:
         self._connected = False
         self._watching = False
         self._account = ""
+        self._mailboxes: list[str] = []
         self._error = "outlook_connecting"
         self._recent_ids: deque[str] = deque(maxlen=WATCH_RECENT_IDS)
         self._app = None
@@ -112,7 +115,11 @@ class OutlookRuntime:
             error=self._error,
             generation=self._generation,
             last_added=self._last_added,
+            mailboxes=list(self._mailboxes),
         )
+
+    def mailboxes(self) -> list[str]:
+        return list(self._mailboxes)
 
     def wait(self, last_generation: int, timeout: float) -> int:
         with self._cv:
@@ -152,7 +159,9 @@ class OutlookRuntime:
                 sink=sink,
                 mark_seen=db.mark_seen,
             )
+            self._mailboxes = list(result.get("mailboxes") or [])
             result["added"] = added
+            result["mailboxes"] = list(self._mailboxes)
             if added:
                 self.notify(added)
             return result
@@ -313,6 +322,7 @@ class OutlookRuntime:
         self._app_events = win32com.client.DispatchWithEvents(app, _AppEvents)
         self._inbox_events = win32com.client.DispatchWithEvents(items, _InboxEvents)
         self._account = account
+        self._mailboxes = list_mailboxes(ns)
         self._connected = True
         self._watching = True
         self._error = ""
@@ -400,6 +410,7 @@ class MailboxHub:
                 graph_logged_in=graph["logged_in"],
                 classic_running=classic_running,
                 new_outlook_running=new_running,
+                mailboxes=self.classic.mailboxes(),
             )
         if active == "graph":
             return WatchSnapshot(
@@ -413,6 +424,7 @@ class MailboxHub:
                 graph_logged_in=True,
                 classic_running=classic_running,
                 new_outlook_running=new_running,
+                mailboxes=self.graph.mailboxes(),
             )
         error = _disconnected_error(
             backend_pref,
@@ -433,7 +445,14 @@ class MailboxHub:
             graph_logged_in=graph["logged_in"],
             classic_running=classic_running,
             new_outlook_running=new_running,
+            mailboxes=_unique_mailboxes(self.classic.mailboxes() + self.graph.mailboxes()),
         )
+
+    def mailboxes(self) -> list[str]:
+        snap = self.snapshot()
+        if snap.mailboxes:
+            return list(snap.mailboxes)
+        return _unique_mailboxes(self.classic.mailboxes() + self.graph.mailboxes())
 
     def wait(self, last_generation: int, timeout: float) -> int:
         with self._cv:
@@ -555,3 +574,12 @@ def _disconnected_error(
 
 
 watcher = MailboxHub()
+
+
+def _unique_mailboxes(names: list[str]) -> list[str]:
+    out: list[str] = []
+    for name in names:
+        label = str(name or "").strip()
+        if label and label not in out:
+            out.append(label)
+    return out
