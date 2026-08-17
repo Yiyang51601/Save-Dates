@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -20,8 +22,58 @@ def app_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _legacy_data_dir() -> Path:
+    return app_dir() / "data"
+
+
+def user_data_dir(*, frozen: bool | None = None, environ: dict[str, str] | None = None) -> Path:
+    env = environ if environ is not None else os.environ
+    override = str(env.get("SAVE_DATES_DATA_DIR") or "").strip()
+    if override:
+        return Path(override)
+    is_frozen = _frozen() if frozen is None else frozen
+    if is_frozen:
+        base = str(env.get("LOCALAPPDATA") or env.get("APPDATA") or "").strip()
+        if base:
+            return Path(base) / "SaveDates"
+    return _legacy_data_dir()
+
+
+_MIGRATE_NAMES = (
+    "settings.json",
+    "save_dates.db",
+    "save_dates.db-wal",
+    "save_dates.db-shm",
+    "msal_cache.bin",
+    "graph_state.json",
+    "title_zh_cache.json",
+    "app.log",
+)
+
+
+def migrate_legacy_data(dest: Path, source: Path | None = None) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    legacy = source or _legacy_data_dir()
+    try:
+        if dest.resolve() == legacy.resolve():
+            return
+    except OSError:
+        return
+    if not legacy.is_dir():
+        return
+    for name in _MIGRATE_NAMES:
+        src = legacy / name
+        dst = dest / name
+        if src.exists() and not dst.exists():
+            try:
+                shutil.copy2(src, dst)
+            except OSError:
+                pass
+
+
 ROOT = app_dir()
-DATA_DIR = ROOT / "data"
+DATA_DIR = user_data_dir()
+migrate_legacy_data(DATA_DIR)
 DB_PATH = DATA_DIR / "save_dates.db"
 SETTINGS_PATH = DATA_DIR / "settings.json"
 TRANSLATE_CACHE_PATH = DATA_DIR / "title_zh_cache.json"
@@ -60,3 +112,4 @@ DEFAULT_GRAPH_CLIENT_ID = "65f4dd53-e782-46a4-a0b1-8ccd331dd6ff"
 CATEGORY_NAME = "Save Dates"
 REMINDER_MINUTES_TIMED = 30
 REMINDER_MINUTES_ALL_DAY = 18 * 60
+STATIC_ASSET_VERSION = "20260817c"

@@ -555,10 +555,11 @@ class MailboxHub:
             return
         self.classic.open_mail(entry_id, store_id)
 
-    def graph_login(self) -> dict[str, Any]:
-        return self.graph.login()
+    def graph_login(self, prompt_account: bool = False) -> dict[str, Any]:
+        return self.graph.login(prompt_account=prompt_account)
 
     def graph_logout(self) -> None:
+        # Sign out of Microsoft only. Keep settings.backend so 记住选择 survives relaunch.
         self.graph.logout()
 
 

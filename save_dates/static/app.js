@@ -10,7 +10,7 @@ const STRINGS = {
     backendAuto: "自动（优先经典 Outlook）",
     backendClassic: "经典 Outlook",
     backendGraph: "新 Outlook（进阶）",
-    classicHint: "未连接时点红色「未连接」可选经典 Outlook 或登录 Microsoft。可仅此次有效，或记住选择。",
+    classicHint: "记住选择后下次不再弹出。Outlook 没开时只提示打开。点红色「未连接」才可改连接方式。",
     connectPickerTitle: "选择邮箱连接方式",
     connectPickerLede: "请选一种。可仅此次有效，或记住以后都用。",
     connectPersistLabel: "这次怎么记？",
@@ -24,6 +24,7 @@ const STRINGS = {
     pickGraphHelp: "用 Microsoft 账号登录。不用填写应用 ID。学校邮箱被拦 Graph（Needs admin approval）时必须用经典 Outlook 登录该账号。",
     connectPickerLater: "稍后再说",
     pickingClassic: "已选择经典 Outlook。请打开 outlook.exe 并保持运行。",
+    openClassicOutlook: "已记住经典 Outlook。请打开 outlook.exe 并保持运行。点红色「未连接」可改。",
     offlinePickHint: "未连接。点击此处选择经典 Outlook，或登录 Microsoft。",
     choose_connection: "未连接。点击此处选择经典 Outlook，或登录 Microsoft。",
     advancedNewOutlook: "进阶 · 仅新 Outlook",
@@ -146,7 +147,7 @@ const STRINGS = {
     backendAuto: "Auto (Classic Outlook first)",
     backendClassic: "Classic Outlook",
     backendGraph: "New Outlook (advanced)",
-    classicHint: "When offline, click the red Offline pill to choose Classic Outlook or Microsoft sign-in. Use it this time only, or remember it.",
+    classicHint: "If you chose Always, we will not ask again. If Outlook is closed we only prompt you to open it. Click the red Offline pill to switch.",
     connectPickerTitle: "How do you want to connect?",
     connectPickerLede: "Pick a connection. Use it this time only, or remember it for next time.",
     connectPersistLabel: "Remember this choice?",
@@ -160,6 +161,7 @@ const STRINGS = {
     pickGraphHelp: "Sign in with your Microsoft account. You do not type an Application ID. If your school blocks Graph (Needs admin approval), sign that account into Classic Outlook.",
     connectPickerLater: "Not now",
     pickingClassic: "Classic Outlook selected. Open outlook.exe and leave it running.",
+    openClassicOutlook: "Classic Outlook is remembered. Open outlook.exe and leave it running. Click the red Offline pill to switch.",
     offlinePickHint: "Not connected. Click here to choose Classic Outlook or Microsoft sign-in.",
     choose_connection: "Not connected. Click here to choose Classic Outlook or Microsoft sign-in.",
     advancedNewOutlook: "Advanced · New Outlook only",
@@ -301,6 +303,9 @@ let lastSearchMeta = { scanned: 0, live: false };
 let searchTimer = 0;
 let searchSeq = 0;
 let connectPickerAutoShown = false;
+let persistBackendAlways = true;
+let graphAutoLoginTried = false;
+let classicReconnectShown = false;
 let listReady = false;
 let emptyHintSessionDone = false;
 let emptyHintTimer = 0;
@@ -492,11 +497,13 @@ function applyStatus(s) {
     $("statusMeta").textContent = s.error ? translateError(s.error) : t("connectedMeta", { timezone: s.timezone || "" });
   } else {
     $("statusTitle").textContent = t("offlineTitle");
-    const pref = s.settings?.backend || "auto";
+    const pref = backendPref(s) || "auto";
     if (pref === "auto") {
       $("statusMeta").textContent = t("offlinePickHint");
+    } else if (pref === "classic") {
+      $("statusMeta").textContent = translateError(s.error) || t("openClassicOutlook");
     } else {
-      $("statusMeta").textContent = translateError(s.error) || t("offlineMeta");
+      $("statusMeta").textContent = translateError(s.error) || t("graph_login_needed");
     }
   }
   const pill = $("statusCard");
@@ -535,12 +542,22 @@ function applyStatus(s) {
   maybeOfferConnectPicker(s);
 }
 
+function backendPref(s) {
+  const pref = s?.backend_pref || s?.settings?.backend;
+  if (pref === "classic" || pref === "graph" || pref === "auto") return pref;
+  return "";
+}
+
 function maybeOfferConnectPicker(s, force = false) {
   const overlay = $("connectPicker");
   if (!overlay) return;
   if (!s || s.connected) {
     hideConnectPicker();
-    if (s?.connected) connectPickerAutoShown = false;
+    if (s?.connected) {
+      connectPickerAutoShown = false;
+      graphAutoLoginTried = false;
+      classicReconnectShown = false;
+    }
     return;
   }
   if (force) {
@@ -548,10 +565,23 @@ function maybeOfferConnectPicker(s, force = false) {
     showConnectPicker();
     return;
   }
+  const pref = backendPref(s);
+  if (!pref) return;
+  if (pref === "classic") {
+    hideConnectPicker();
+    if (!classicReconnectShown) {
+      classicReconnectShown = true;
+      setBanner(t("openClassicOutlook"));
+    }
+    return;
+  }
+  if (pref === "graph") {
+    hideConnectPicker();
+    maybeAutoGraphLogin(s);
+    return;
+  }
   if (!overlay.classList.contains("hidden")) return;
   if (connectPickerAutoShown) return;
-  const pref = s.settings?.backend || "auto";
-  if (pref !== "auto") return;
   connectPickerAutoShown = true;
   showConnectPicker();
 }
@@ -562,13 +592,21 @@ function showConnectPicker() {
   overlay.classList.remove("hidden");
   document.body.classList.add("modal-open");
   const always = $("connectPersistAlways");
-  if (always) always.checked = true;
+  if (always) always.checked = persistBackendAlways;
+  const once = $("connectPersistOnce");
+  if (once) once.checked = !persistBackendAlways;
   const first = $("pickClassic");
   if (first) first.focus();
 }
 
+function syncPersistBackendChoice() {
+  const always = $("connectPersistAlways");
+  if (always) persistBackendAlways = Boolean(always.checked);
+}
+
 function shouldPersistBackend() {
-  return Boolean($("connectPersistAlways")?.checked);
+  syncPersistBackendChoice();
+  return persistBackendAlways;
 }
 
 function hideConnectPicker() {
@@ -584,11 +622,12 @@ function openConnectPickerFromStatus() {
 }
 
 async function chooseClassicOutlook() {
+  const persist = shouldPersistBackend();
   hideConnectPicker();
   try {
     await api("/api/settings", {
       method: "PUT",
-      body: JSON.stringify({ backend: "classic", persist_backend: shouldPersistBackend() }),
+      body: JSON.stringify({ backend: "classic", persist_backend: persist }),
     });
     setBanner(t("pickingClassic"));
     await refreshStatus();
@@ -597,17 +636,41 @@ async function chooseClassicOutlook() {
   }
 }
 
-async function chooseGraphOutlook() {
-  hideConnectPicker();
+async function startMicrosoftLogin(promptAccount) {
   setBanner(t("loggingIn"));
+  try {
+    const q = promptAccount ? "?prompt_account=true" : "";
+    const status = await api(`/api/microsoft/login${q}`, { method: "POST" });
+    applyStatus(status);
+    setBanner(status.connected ? t("msConnected") : "");
+  } catch (err) {
+    setBanner(err.message, true);
+    $("advancedBox").open = true;
+    if (String(err.message).includes("graph_client_id_missing") || t("graph_client_id_missing") === err.message) {
+      $("graphSetup").open = true;
+    }
+  }
+}
+
+function maybeAutoGraphLogin(s) {
+  if (graphAutoLoginTried || !s || s.connected) return;
+  if (s.error === "graph_auth_cancelled") return;
+  const expired = s.error === "graph_login_needed" || s.error === "graph_auth_failed";
+  const noAccount = !s.graph_logged_in;
+  if (!expired && !noAccount) return;
+  graphAutoLoginTried = true;
+  startMicrosoftLogin(false);
+}
+
+async function chooseGraphOutlook() {
+  const persist = shouldPersistBackend();
+  hideConnectPicker();
   try {
     await api("/api/settings", {
       method: "PUT",
-      body: JSON.stringify({ backend: "graph", persist_backend: shouldPersistBackend() }),
+      body: JSON.stringify({ backend: "graph", persist_backend: persist }),
     });
-    const status = await api("/api/microsoft/login", { method: "POST" });
-    applyStatus(status);
-    setBanner(status.connected ? t("msConnected") : "");
+    await startMicrosoftLogin(true);
   } catch (err) {
     setBanner(err.message, true);
     $("advancedBox").open = true;
@@ -1366,22 +1429,20 @@ $("connectPicker").addEventListener("click", (event) => {
   if (event.target === $("connectPicker")) hideConnectPicker();
 });
 
+$("connectPersistAlways").addEventListener("change", () => {
+  persistBackendAlways = true;
+});
+
+$("connectPersistOnce").addEventListener("change", () => {
+  persistBackendAlways = false;
+});
+
 $("msLoginBtn").addEventListener("click", async () => {
-  setBanner(t("loggingIn"));
-  try {
-    const status = await api("/api/microsoft/login", { method: "POST" });
-    applyStatus(status);
-    setBanner(status.connected ? t("msConnected") : "");
-  } catch (err) {
-    setBanner(err.message, true);
-    $("advancedBox").open = true;
-    if (String(err.message).includes("graph_client_id_missing") || t("graph_client_id_missing") === err.message) {
-      $("graphSetup").open = true;
-    }
-  }
+  await startMicrosoftLogin(true);
 });
 
 $("msLogoutBtn").addEventListener("click", async () => {
+  graphAutoLoginTried = true;
   try {
     const status = await api("/api/microsoft/logout", { method: "POST" });
     applyStatus(status);

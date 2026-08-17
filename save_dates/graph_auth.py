@@ -43,7 +43,7 @@ def cached_account_label() -> str:
         return ""
 
 
-def acquire_token(interactive: bool = False) -> str:
+def acquire_token(interactive: bool = False, prompt_account: bool = False) -> str:
     import msal
 
     client_id = get_client_id()
@@ -58,10 +58,11 @@ def acquire_token(interactive: bool = False) -> str:
     if (not result or "access_token" not in result) and interactive:
         # Public native client: MSAL opens the system browser on http://localhost
         # (free port). Entra must allow that redirect. Do not add a client secret.
-        result = app.acquire_token_interactive(
-            list(GRAPH_SCOPES),
-            prompt="select_account",
-        )
+        # Remembered reconnect should SSO; only an explicit switch-account uses select_account.
+        kwargs: dict[str, Any] = {}
+        if prompt_account:
+            kwargs["prompt"] = "select_account"
+        result = app.acquire_token_interactive(list(GRAPH_SCOPES), **kwargs)
     _save_cache(cache)
     if result and "access_token" in result:
         return str(result["access_token"])

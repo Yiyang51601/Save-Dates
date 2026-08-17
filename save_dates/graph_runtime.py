@@ -71,10 +71,10 @@ class GraphRuntime:
         label = str(self._account or cached_account_label() or "").strip()
         return [label] if label else []
 
-    def login(self) -> dict[str, Any]:
+    def login(self, prompt_account: bool = False) -> dict[str, Any]:
         self._interactive = True
         try:
-            token = acquire_token(interactive=True)
+            token = acquire_token(interactive=True, prompt_account=prompt_account)
             profile = get_profile(token)
             self._set_state(True, True, profile["label"], "")
             if not self._last_received:

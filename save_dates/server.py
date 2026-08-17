@@ -11,6 +11,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.requests import Request
 from pydantic import BaseModel, Field
 
 from save_dates import db
@@ -47,6 +48,15 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="Save Dates", docs_url=None, redoc_url=None, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.middleware("http")
+async def no_cache_ui(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 class ScanRequest(BaseModel):
@@ -125,6 +135,7 @@ def _snap_payload(snap, extra: dict | None = None) -> dict:
         "greeting": greeting_phrase(snap.account, lang),
         "error": snap.error,
         "backend": snap.backend,
+        "backend_pref": settings.get("backend") or "auto",
         "graph_logged_in": snap.graph_logged_in,
         "classic_running": snap.classic_running,
         "new_outlook_running": snap.new_outlook_running,
@@ -347,7 +358,7 @@ def _demo_candidates(lang: str = "zh") -> list[dict]:
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/status")
@@ -703,9 +714,9 @@ def api_put_settings(patch: SettingsPatch) -> dict:
 
 
 @app.post("/api/microsoft/login")
-def api_microsoft_login() -> dict:
+def api_microsoft_login(prompt_account: bool = False) -> dict:
     try:
-        watcher.graph_login()
+        watcher.graph_login(prompt_account=prompt_account)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc) or "graph_auth_failed") from exc
     except Exception as exc:

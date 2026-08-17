@@ -35,8 +35,16 @@ def test_home_and_static():
         assert "This time only" in js.text
         assert "记住选择" in js.text
         assert "persist_backend" in js.text
+        assert "persistBackendAlways" in js.text
+        assert "backendPref" in js.text
+        assert "backend_pref" in js.text
+        assert "openClassicOutlook" in js.text
+        assert "graphAutoLoginTried" in js.text
+        assert "maybeAutoGraphLogin" in js.text
         assert "You do not type an Application ID" in js.text
         assert "connectPickerAutoShown" in js.text
+        assert "app.js?v=" in home.text
+        assert "no-store" in (home.headers.get("cache-control") or "").lower()
         assert "detectSystemLang" in js.text
         assert "emptyHintSessionDone" in js.text
         assert "empty-hint-out" in js.text
@@ -207,6 +215,67 @@ def test_auto_backend_asks_user_to_choose_connection():
     assert _disconnected_error("auto", "", "", False, False, False) == "choose_connection"
     assert _disconnected_error("classic", "", "", False, False, True) == "outlook_not_running"
     assert _disconnected_error("graph", "", "", False, False, True) == "graph_login_needed"
+
+
+def test_remembered_backend_survives_session_clear(tmp_path, monkeypatch):
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setattr("save_dates.db.SETTINGS_PATH", settings_path)
+    monkeypatch.setattr("save_dates.db.DATA_DIR", tmp_path)
+    from save_dates import db
+
+    db.clear_session_backend()
+    try:
+        with TestClient(app) as client:
+            saved = client.put("/api/settings", json={"backend": "classic", "persist_backend": True})
+            assert saved.json()["backend"] == "classic"
+            status = client.get("/api/status").json()
+            assert status["backend_pref"] == "classic"
+            assert status["settings"]["backend"] == "classic"
+        db.clear_session_backend()
+        assert db.get_settings()["backend"] == "classic"
+        raw = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert raw["backend"] == "classic"
+        with TestClient(app) as client:
+            client.put("/api/settings", json={"backend": "auto"})
+    finally:
+        db.clear_session_backend()
+
+
+def test_graph_logout_does_not_clear_backend(tmp_path, monkeypatch):
+    settings_path = tmp_path / "settings.json"
+    monkeypatch.setattr("save_dates.db.SETTINGS_PATH", settings_path)
+    monkeypatch.setattr("save_dates.db.DATA_DIR", tmp_path)
+    from save_dates import db
+
+    db.clear_session_backend()
+    try:
+        with TestClient(app) as client:
+            client.put("/api/settings", json={"backend": "graph", "persist_backend": True})
+            logged_out = client.post("/api/microsoft/logout")
+            assert logged_out.status_code == 200
+            assert client.get("/api/settings").json()["backend"] == "graph"
+            assert client.get("/api/status").json()["backend_pref"] == "graph"
+            raw = json.loads(settings_path.read_text(encoding="utf-8"))
+            assert raw["backend"] == "graph"
+            client.put("/api/settings", json={"backend": "auto"})
+    finally:
+        db.clear_session_backend()
+
+
+def test_frozen_settings_live_in_appdata(tmp_path):
+    from save_dates.config import migrate_legacy_data, user_data_dir
+
+    env = {"LOCALAPPDATA": str(tmp_path / "appdata")}
+    dest = user_data_dir(frozen=True, environ=env)
+    assert dest == tmp_path / "appdata" / "SaveDates"
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    (legacy / "settings.json").write_text('{"backend": "classic"}', encoding="utf-8")
+    migrate_legacy_data(dest, legacy)
+    assert (dest / "settings.json").read_text(encoding="utf-8") == '{"backend": "classic"}'
+    (legacy / "settings.json").write_text('{"backend": "graph"}', encoding="utf-8")
+    migrate_legacy_data(dest, legacy)
+    assert (dest / "settings.json").read_text(encoding="utf-8") == '{"backend": "classic"}'
 
 
 def test_desktop_show_without_window_is_404():
