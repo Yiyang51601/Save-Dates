@@ -25,19 +25,23 @@ from save_dates.config import (
     SEARCH_SCAN_DAYS,
     STATIC_DIR,
 )
+from save_dates.display_title import calendar_write_title
 from save_dates.extract import ensure_aware, local_tz
 from save_dates.greet import given_name, greeting_phrase
 from save_dates.i18n import system_ui_lang
+from save_dates.translator import set_translated_callback
 from save_dates.watcher import watcher
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     db.init_db()
+    set_translated_callback(lambda: watcher.notify(0))
     watcher.start()
     try:
         yield
     finally:
+        set_translated_callback(None)
         watcher.stop()
 
 
@@ -537,9 +541,11 @@ def api_patch(candidate_id: int, patch: CandidatePatch) -> dict:
 
 def _source_body(item: dict) -> str:
     lang = db.get_settings()["lang"]
+    original = str(item.get("title") or item.get("subject") or "")
     if lang == "en":
         return (
             f"Source email: {item['subject']}\n"
+            f"Original title: {original}\n"
             f"From: {item['sender']}\n"
             f"Received: {item['received_at']}\n"
             f"Excerpt: {item['snippet']}\n"
@@ -548,6 +554,7 @@ def _source_body(item: dict) -> str:
         )
     return (
         f"来源邮件：{item['subject']}\n"
+        f"原标题：{original}\n"
         f"发件人：{item['sender']}\n"
         f"收到时间：{item['received_at']}\n"
         f"原文摘录：{item['snippet']}\n"
@@ -571,10 +578,11 @@ def _accept_one(candidate_id: int) -> dict:
             entry_id = ""
         updated = db.set_status(candidate_id, "accepted", entry_id)
         return updated or item
+    write_title = calendar_write_title(item)
     if (item.get("kind") or "event") == "task":
         entry_id = ""
         try:
-            entry_id = watcher.create_task(title=item["title"], body=body)
+            entry_id = watcher.create_task(title=write_title, body=body)
         except Exception:
             entry_id = ""
         updated = db.set_status(candidate_id, "accepted", entry_id)
@@ -585,7 +593,7 @@ def _accept_one(candidate_id: int) -> dict:
         end = start + (timedelta(days=1) if item["all_day"] else timedelta(hours=1))
     try:
         entry_id = watcher.create_event(
-            title=item["title"],
+            title=write_title,
             start=start,
             end=end,
             all_day=bool(item["all_day"]),

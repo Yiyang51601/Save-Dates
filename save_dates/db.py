@@ -10,6 +10,7 @@ from typing import Any
 from save_dates.config import DATA_DIR, DB_PATH, SETTINGS_PATH
 from save_dates.display_title import attach_display_titles
 from save_dates.i18n import system_ui_lang
+from save_dates.priority import attach_priority, sort_pending
 
 _lock = threading.Lock()
 _session_backend: str | None = None
@@ -147,7 +148,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     email_id = str(item.get("email_id") or "")
     mail_url = str(item.get("mail_url") or "")
     item["can_open_mail"] = (bool(email_id) and not email_id.startswith("demo-")) or bool(mail_url)
-    return attach_display_titles(item)
+    return attach_priority(attach_display_titles(item))
 
 
 def list_searchable(limit: int = 200) -> list[dict[str, Any]]:
@@ -198,9 +199,22 @@ def find_candidate_match(
 
 def list_candidates(status: str | None = "pending", limit: int = 80) -> list[dict[str, Any]]:
     limit = max(1, min(int(limit), 200))
+    fetch_limit = 400 if status == "pending" else limit
     with _lock:
         conn = _connect()
         try:
+            if status == "pending":
+                rows = conn.execute(
+                    """
+                    SELECT * FROM candidates
+                    WHERE status = ?
+                    ORDER BY start_at ASC, id ASC
+                    LIMIT ?
+                    """,
+                    (status, fetch_limit),
+                ).fetchall()
+                items = [_row_to_dict(r) for r in rows]
+                return sort_pending(items)[:limit]
             if status:
                 rows = conn.execute(
                     """

@@ -54,6 +54,8 @@ def test_home_and_static():
         assert "未找到该邮箱，请在经典 Outlook 添加并保持运行" in js.text
         assert "cardTitle" in js.text
         assert "title_zh" in js.text
+        assert "snippet_zh" in js.text
+        assert "priorityHigh" in js.text
         assert "currentMailbox = \"\"" in js.text
         assert "mailboxHint" in home.text
         assert "讲座通知" not in js.text
@@ -91,6 +93,9 @@ def test_status_and_demo_review_flow():
         assert isinstance(listed.json().get("unread_mailboxes"), list)
         items = listed.json()["items"]
         assert items
+        assert all("priority" in item for item in items)
+        scores = [item["priority"] for item in items]
+        assert scores == sorted(scores, reverse=True)
         first = items[0]
         patched = client.patch(
             f"/api/candidates/{first['id']}",

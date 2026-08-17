@@ -56,6 +56,8 @@ hiddenimports = [
     "save_dates.greet",
     "save_dates.i18n",
     "save_dates.display_title",
+    "save_dates.translator",
+    "save_dates.priority",
     "msal",
 ]
 

@@ -24,6 +24,7 @@ ROOT = app_dir()
 DATA_DIR = ROOT / "data"
 DB_PATH = DATA_DIR / "save_dates.db"
 SETTINGS_PATH = DATA_DIR / "settings.json"
+TRANSLATE_CACHE_PATH = DATA_DIR / "title_zh_cache.json"
 STATIC_DIR = bundle_dir() / "save_dates" / "static"
 ICON_PATH = bundle_dir() / "assets" / "icon.ico"
 LOG_PATH = DATA_DIR / "app.log"

@@ -74,6 +74,7 @@ const STRINGS = {
     schoolMailboxHint: "学校邮箱被拦 Graph 时必须用经典 Outlook 登录该账号。",
     missingMailbox: "未找到该邮箱，请在经典 Outlook 添加并保持运行。 Mailbox not found — add it in Classic Outlook and leave Outlook running.",
     originalTitle: "原标题：{title}",
+    priorityHigh: "优先",
     promoKind: "广告",
     acceptPromo: "清掉",
     addedPromo: "已移到 Outlook 垃圾箱。",
@@ -209,6 +210,7 @@ const STRINGS = {
     schoolMailboxHint: "If your school blocks Graph (Needs admin approval), sign that account into Classic Outlook.",
     missingMailbox: "Mailbox not found — add it in Classic Outlook and leave Outlook running. 未找到该邮箱，请在经典 Outlook 添加并保持运行。",
     originalTitle: "Original: {title}",
+    priorityHigh: "Priority",
     promoKind: "Ad",
     acceptPromo: "Junk",
     addedPromo: "Moved to Junk Email.",
@@ -656,6 +658,16 @@ function cardTitle(item) {
   return item.title || "";
 }
 
+function cardSnippet(item) {
+  if (lang === "zh") return item.snippet_zh || item.snippet || "";
+  return item.snippet || "";
+}
+
+function priorityTagHtml(item) {
+  if (item.priority_band !== "high") return "";
+  return `<span class="prio-tag">${escapeHtml(t("priorityHigh"))}</span>`;
+}
+
 function originalTitleHtml(item) {
   if (lang !== "zh") return "";
   const shown = cardTitle(item);
@@ -841,6 +853,8 @@ function render(items) {
         </div>`;
     }
     const titleText = cardTitle(item);
+    card.dataset.origTitle = item.title || "";
+    card.dataset.titleZh = item.title_zh || "";
     const fields = (task || promo)
       ? `<div class="fields">
           <input class="title" data-field="title" value="${escapeHtml(titleText)}" />
@@ -855,14 +869,14 @@ function render(items) {
       <input class="pick" type="checkbox" value="${item.id}" />
       ${dateBlock}
       <div class="body">
-        <h2>${escapeHtml(titleText)}${approx}</h2>
+        <h2>${escapeHtml(titleText)}${approx}${priorityTagHtml(item)}</h2>
         ${originalTitleHtml(item)}
         <p class="who">${mailbox}${escapeHtml(t("fromMail", {
           sender: item.sender,
           subject: item.subject,
           received: fmtReceived(item.received_at),
         }))}</p>
-        <div class="snippet">${highlight(item.snippet || "", item.matched_text || "")}</div>
+        <div class="snippet">${highlight(cardSnippet(item), item.matched_text || "")}</div>
         ${fields}
         <div class="confidence">${escapeHtml(t("match", { text: item.matched_text, n: Math.round(item.confidence * 100) }))}</div>
       </div>
@@ -917,7 +931,7 @@ function renderSearch(items, query, meta = {}) {
     const openDisabled = item.can_open_mail ? "" : "disabled";
     return `<div class="search-hit" data-search-index="${index}" role="button" tabindex="0">
       <div class="hit-top">
-        <div class="hit-title">${escapeHtml(lang === "zh" ? (item.title_zh || item.title || item.subject || "") : (item.title || item.subject || ""))}</div>
+        <div class="hit-title">${escapeHtml(lang === "zh" ? (item.title_zh || item.title || item.subject || "") : (item.title || item.subject || ""))}${item.priority_band === "high" ? ` <span class="prio-tag">${escapeHtml(t("priorityHigh"))}</span>` : ""}</div>
         <div class="hit-when">${escapeHtml(when)}</div>
       </div>
       <div class="hit-meta"><span class="hit-tag ${sourceClass(item)}">${escapeHtml(sourceLabel(item))}</span>${escapeHtml(t("fromMail", {
@@ -925,7 +939,7 @@ function renderSearch(items, query, meta = {}) {
         subject: item.subject || "",
         received: fmtReceived(item.received_at),
       }))}</div>
-      <div class="hit-snippet">${snippet}</div>
+      <div class="hit-snippet">${lang === "zh" ? highlightQuery(item.snippet_zh || item.snippet || item.subject || "", query, item.highlight || "") : snippet}</div>
       <button class="ghost small hit-mail" type="button" data-search-open="${index}" ${openDisabled}>${escapeHtml(t("searchOpen"))}</button>
     </div>`;
   }).join("");
@@ -1047,19 +1061,24 @@ async function loadList() {
 async function saveEdits(card) {
   const id = Number(card.dataset.id);
   const title = card.querySelector("[data-field=title]").value.trim();
+  const shown = lang === "zh" ? (card.dataset.titleZh || card.dataset.origTitle || "") : (card.dataset.origTitle || "");
+  const payload = {};
+  if (title && title !== shown) payload.title = title;
   if (card.dataset.kind === "task" || card.dataset.kind === "promo") {
+    if (!payload.title) return;
     await api(`/api/candidates/${id}`, {
       method: "PATCH",
-      body: JSON.stringify({ title }),
+      body: JSON.stringify(payload),
     });
     return;
   }
   const allDay = card.querySelector("[data-field=all_day]").checked;
   const when = card.querySelector("[data-field=when]").value;
-  const startAt = allDay ? `${when}T00:00` : when;
+  payload.all_day = allDay;
+  payload.start_at = allDay ? `${when}T00:00` : when;
   await api(`/api/candidates/${id}`, {
     method: "PATCH",
-    body: JSON.stringify({ title, all_day: allDay, start_at: startAt }),
+    body: JSON.stringify(payload),
   });
 }
 

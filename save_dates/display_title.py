@@ -1,9 +1,11 @@
-"""Offline Chinese display titles for review cards. No network translation."""
+"""Chinese display titles for review cards. Glossary first, then optional network."""
 
 from __future__ import annotations
 
 import re
 from typing import Any
+
+from save_dates.translator import cache_get, enqueue_translation, translate_to_zh
 
 _CJK = re.compile(r"[\u4e00-\u9fff]")
 _PREFIX = re.compile(r"^(re|fw|fwd|转发)\s*[:：]\s*", re.I)
@@ -86,13 +88,107 @@ def chinese_display_title(
     return label
 
 
-def attach_display_titles(item: dict[str, Any]) -> dict[str, Any]:
-    row = dict(item)
-    row["title_zh"] = chinese_display_title(
-        title=str(row.get("title") or ""),
-        subject=str(row.get("subject") or ""),
-        snippet=str(row.get("snippet") or ""),
-        kind=str(row.get("kind") or "event"),
-        task_type=str(row.get("task_type") or ""),
+def needs_translation(text: str) -> bool:
+    raw = text or ""
+    if not re.search(r"[A-Za-z]{3,}", raw):
+        return False
+    latin = len(re.findall(r"[A-Za-z]", raw))
+    cjk = len(_CJK.findall(raw))
+    return latin >= 8 and latin > cjk
+
+
+def _want_zh_display() -> bool:
+    try:
+        from save_dates.db import get_settings
+
+        return get_settings().get("lang") != "en"
+    except Exception:
+        return True
+
+
+def _translate_short(text: str, *, wait: bool) -> str:
+    source = (text or "").strip()
+    if not source or not needs_translation(source):
+        return ""
+    cached = cache_get(source)
+    if cached:
+        return cached
+    if wait:
+        got = translate_to_zh(source, network=True)
+        return got if has_chinese(got) else ""
+    enqueue_translation(source)
+    return ""
+
+
+def _display_title_zh(
+    title: str,
+    subject: str,
+    snippet: str,
+    kind: str,
+    task_type: str,
+    *,
+    wait: bool,
+) -> str:
+    for raw in (title, subject):
+        found = chinese_from_text(raw)
+        if found:
+            return found
+    english = _clean(title) or _clean(subject)
+    translated = _translate_short(english, wait=wait)
+    if translated:
+        return translated[:80]
+    return chinese_display_title(
+        title=title,
+        subject=subject,
+        snippet=snippet,
+        kind=kind,
+        task_type=task_type,
     )
+
+
+def attach_display_titles(item: dict[str, Any], *, wait: bool = False) -> dict[str, Any]:
+    row = dict(item)
+    title = str(row.get("title") or "")
+    subject = str(row.get("subject") or "")
+    snippet = str(row.get("snippet") or "")
+    kind = str(row.get("kind") or "event")
+    task_type = str(row.get("task_type") or "")
+    glossary = chinese_display_title(
+        title=title,
+        subject=subject,
+        snippet=snippet,
+        kind=kind,
+        task_type=task_type,
+    )
+    if _want_zh_display():
+        row["title_zh"] = _display_title_zh(
+            title, subject, snippet, kind, task_type, wait=wait
+        )
+        snippet_zh = snippet
+        if snippet and needs_translation(snippet):
+            translated = _translate_short(snippet[:200], wait=wait)
+            if translated:
+                snippet_zh = translated
+        row["snippet_zh"] = snippet_zh
+    else:
+        row["title_zh"] = glossary
+        row["snippet_zh"] = snippet
     return row
+
+
+def calendar_write_title(item: dict[str, Any]) -> str:
+    """Chinese display title for Outlook when the UI is 中; original otherwise."""
+    raw = str(item.get("title") or "").strip()
+    if not _want_zh_display():
+        return raw
+    if has_chinese(raw) and not needs_translation(raw):
+        return raw
+    translated = _display_title_zh(
+        raw,
+        str(item.get("subject") or ""),
+        str(item.get("snippet") or ""),
+        str(item.get("kind") or "event"),
+        str(item.get("task_type") or ""),
+        wait=True,
+    )
+    return translated or raw

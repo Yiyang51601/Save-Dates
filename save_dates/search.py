@@ -11,6 +11,7 @@ from save_dates.config import (
 )
 from save_dates.display_title import attach_display_titles
 from save_dates.extract import match_threshold, score_search_fields, snippet_around_query
+from save_dates.priority import attach_priority
 
 SEARCH_FIELDS = ("subject", "snippet", "title", "sender", "matched_text")
 
@@ -60,7 +61,7 @@ def _decorate(
     row["can_open_mail"] = bool(row.get("can_open_mail")) or (
         (bool(email_id) and not email_id.startswith("demo-")) or bool(mail_url)
     )
-    return attach_display_titles(row)
+    return attach_priority(attach_display_titles(row))
 
 
 def _dedup_key(item: dict[str, Any]) -> tuple[str, str, str, str]:
