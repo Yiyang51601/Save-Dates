@@ -95,6 +95,8 @@ const STRINGS = {
     acceptTask: "记下",
     reject: "跳过",
     openMail: "原邮件",
+    location: "地点",
+    notes: "备注",
     batchAccept: "加入所选",
     batchReject: "跳过所选",
     selected: "已选 {n} 条",
@@ -246,6 +248,8 @@ const STRINGS = {
     acceptTask: "Save",
     reject: "Skip",
     openMail: "Mail",
+    location: "Location",
+    notes: "Notes",
     weekdays: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
     scanning: "Scanning mail and extracting dates…",
     scanned: "Scanned {scanned} messages, found {found} items, added {added} to review. Skipped {skipped} meeting invites.",
@@ -918,14 +922,25 @@ function render(items) {
     const titleText = cardTitle(item);
     card.dataset.origTitle = item.title || "";
     card.dataset.titleZh = item.title_zh || "";
-    const fields = (task || promo)
+    const locationField = `<label class="field-block"><span class="field-label">${escapeHtml(t("location"))}</span>
+          <input data-field="location" value="${escapeHtml(item.location || "")}" /></label>`;
+    const notesField = `<label class="field-block field-notes"><span class="field-label">${escapeHtml(t("notes"))}</span>
+          <textarea data-field="notes" rows="2">${escapeHtml(item.notes || "")}</textarea></label>`;
+    const fields = promo
       ? `<div class="fields">
           <input class="title" data-field="title" value="${escapeHtml(titleText)}" />
+        </div>`
+      : task
+      ? `<div class="fields">
+          <input class="title" data-field="title" value="${escapeHtml(titleText)}" />
+          ${notesField}
         </div>`
       : `<div class="fields">
           <input class="title" data-field="title" value="${escapeHtml(titleText)}" />
           <input data-field="when" type="${item.all_day ? "date" : "datetime-local"}" value="${item.all_day ? toDateInput(start) : toLocalInput(start)}" />
           <label class="check"><input data-field="all_day" type="checkbox" ${item.all_day ? "checked" : ""} /> ${t("allDay")}</label>
+          ${locationField}
+          ${notesField}
         </div>`;
     const mailbox = item.mailbox ? `<span class="mailbox-tag">${escapeHtml(item.mailbox)}</span> ` : "";
     card.innerHTML = `
@@ -1053,6 +1068,8 @@ async function focusSearchItem(item) {
       kind: item.kind || "event",
       task_type: item.task_type || "",
       mailbox: item.mailbox || "",
+      location: item.location || "",
+      notes: item.notes || "",
     }),
   });
   await loadList();
@@ -1127,8 +1144,12 @@ async function saveEdits(card) {
   const shown = lang === "zh" ? (card.dataset.titleZh || card.dataset.origTitle || "") : (card.dataset.origTitle || "");
   const payload = {};
   if (title && title !== shown) payload.title = title;
+  const locEl = card.querySelector("[data-field=location]");
+  const notesEl = card.querySelector("[data-field=notes]");
+  if (locEl) payload.location = locEl.value.trim();
+  if (notesEl) payload.notes = notesEl.value.trim();
   if (card.dataset.kind === "task" || card.dataset.kind === "promo") {
-    if (!payload.title) return;
+    if (!Object.keys(payload).length) return;
     await api(`/api/candidates/${id}`, {
       method: "PATCH",
       body: JSON.stringify(payload),

@@ -15,6 +15,7 @@ from save_dates.display_title import attach_display_titles
 from save_dates.extract import (
     ExtractedEvent,
     extract_all,
+    extract_location_notes,
     html_to_text,
     local_tz,
     match_threshold,
@@ -170,6 +171,8 @@ def _events_from_item(
     if start < now - timedelta(hours=12) or start > now + timedelta(days=400):
         return []
     title = (subject or "会议邀请")[:80]
+    location, notes = extract_location_notes(subject, body)
+    outlook_loc = _safe_str(item, "Location").strip()
     return [
         ExtractedEvent(
             title=title,
@@ -181,6 +184,8 @@ def _events_from_item(
             confidence=0.72,
             fuzzy=False,
             kind="event",
+            location=location or outlook_loc[:255],
+            notes=notes,
         )
     ]
 
@@ -218,6 +223,7 @@ def mail_to_candidates(item: Any, now: datetime | None = None) -> tuple[str, lis
 
     now = now or datetime.now(local_tz())
     events = _events_from_item(item, subject, body, sender, received, now, list_unsubscribe)
+    outlook_loc = _safe_str(item, "Location").strip()
     candidates = [
         attach_display_titles(
             {
@@ -238,6 +244,8 @@ def mail_to_candidates(item: Any, now: datetime | None = None) -> tuple[str, lis
                 "fuzzy": event.fuzzy,
                 "kind": event.kind,
                 "task_type": event.task_type,
+                "location": event.location or outlook_loc[:255],
+                "notes": event.notes or "",
             }
         )
         for event in events
@@ -650,13 +658,28 @@ def create_calendar_event_with_app(
     end: datetime,
     all_day: bool,
     body: str,
+    location: str = "",
 ) -> str:
     appt = app.CreateItem(OL_APPOINTMENT)
     appt.Subject = title[:255]
     appt.Start = _to_naive_local(start)
     appt.End = _to_naive_local(end)
     appt.AllDayEvent = bool(all_day)
-    appt.Body = body
+    loc = (location or "").strip()
+    if loc:
+        try:
+            appt.Location = loc[:255]
+        except Exception:
+            pass
+    text = body or ""
+    if text:
+        try:
+            appt.Body = text
+        except Exception:
+            try:
+                appt.HTMLBody = text
+            except Exception:
+                pass
     appt.BusyStatus = OL_TENTATIVE
     appt.Categories = CATEGORY_NAME
     appt.ReminderSet = True

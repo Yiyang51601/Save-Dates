@@ -103,6 +103,8 @@ class ExtractedEvent:
     fuzzy: bool = False
     kind: str = "event"
     task_type: str = ""
+    location: str = ""
+    notes: str = ""
 
 
 def html_to_text(raw: str) -> str:
@@ -121,6 +123,282 @@ def html_to_text(raw: str) -> str:
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()[:BODY_CHAR_LIMIT]
+
+
+_LOCATION_LABELS = (
+    "举办地点", "活动地点", "会议地点", "举办地", "地点", "地址", "位置", "场地",
+    "教室", "会议室", "楼层",
+    "meeting room", "classroom", "building", "venue", "location", "address",
+    "where", "place", "room", "hall",
+)
+_NOTE_LABELS = (
+    "入口指引", "着装要求", "注意事项", "停车位", "入口", "进门", "着装", "注意",
+    "提醒", "要带", "需带", "携带", "请带", "停车", "议程", "流程", "备注",
+    "what to bring", "please bring", "please note", "dress code", "meeting link",
+    "join zoom", "join teams", "enter via", "how to get there", "entrance",
+    "instructions", "instruction", "parking", "agenda", "reminder", "access",
+    "bring", "rsvp", "notes", "note", "zoom", "teams", "meet",
+)
+_SKIP_LABELS = (
+    "开始时间", "结束时间", "时间", "日期", "开始", "结束", "主题", "标题",
+    "发件人", "datetime", "subject", "title", "starts", "ends", "start", "end",
+    "when", "date", "time", "from",
+)
+_MEET_URL = re.compile(
+    r"https?://[^\s<>\"']*(?:zoom\.us|zoom\.com|teams\.microsoft\.com|teams\.live\.com|"
+    r"meet\.google\.com|webex\.com|gotomeet(?:ing)?\.com)[^\s<>\"']*",
+    re.I,
+)
+_ONLINE_LOC = re.compile(
+    r"(?i)^(zoom|teams|google meet|meet|webex|online|virtual|线上|线上会议|网络会议|视频会议)$"
+)
+_DATEISH_LOC = re.compile(
+    r"(?i)^\s*(?:\d{4}\s*年\s*)?\d{1,2}\s*月\s*\d{1,2}\s*[日号]?"
+    r"(?:\s*[（(]?星期?[一二三四五六日天][)）]?)?"
+    r"|\d{4}[-/.]\d{1,2}[-/.]\d{1,2}"
+    r"|(?:mon|tues?|wed|thurs?|fri|sat|sun|monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+    r"|(?:january|february|march|april|may|june|july|august|september|october|november|december)"
+)
+_EN_PLACE_NOUN = (
+    r"Hall|Building|Center|Centre|Auditorium|Theatre|Theater|Library|"
+    r"Lab|Laboratory|Room|Classroom|Lounge|Quad|Stadium|Office|"
+    r"Chapel|Gym|Gymnasium|Ballroom|Pavilion|Annex"
+)
+_EN_AT_PLACE = re.compile(
+    r"(?i)\b(?:in|at|@)\s+(?!the\s+(?:email|message|meantime|morning|afternoon|evening)\b)"
+    r"(?:the\s+)?("
+    r"(?:[A-Z][\w.'\-]*(?:\s+[A-Z][\w.'\-]*){0,6}\s+)?(?:" + _EN_PLACE_NOUN + r")"
+    r"(?:\s+[A-Z]?\d{2,5}(?:\s*/\s*[A-Z]?\d{2,5})*)?"
+    r")"
+)
+_CN_AT_PLACE = re.compile(
+    r"在\s*"
+    r"((?:[A-Za-z][A-Za-z0-9 .'\-]{0,40}|[\u4e00-\u9fff0-9A-Za-z]{0,24})?"
+    r"(?:礼堂|大厅|教室|会议室|报告厅|中心|大楼|大厦|图书馆|办公楼|馆|厅))"
+)
+_FLOOR_TOKEN = re.compile(
+    r"(?<!\d)(\d{1,2})\s*楼|(?:floor|level)\s*(\d{1,2})",
+    re.I,
+)
+_ROOM_CODE = re.compile(r"\b([A-Z]\d{2,4}(?:\s*/\s*[A-Z]?\d{2,4})+)\b")
+_EN_ROOM = re.compile(r"(?i)\b(?:room|rm\.?)\s*([A-Za-z]?\d{2,5}(?:\s*/\s*[A-Za-z]?\d{2,5})*)")
+_CN_ROOM = re.compile(r"(?:教室|会议室|室)\s*([A-Za-z]?\d{2,5}(?:\s*/\s*[A-Za-z]?\d{2,5})*)")
+_NOTE_LOOSE = re.compile(
+    r"(?i)((?:please\s+)?(?:bring|rsvp\b|enter(?:\s+via)?|park(?:ing)?(?:\s+at)?|"
+    r"wear|dress(?:\s+code)?)\s*[^\n。.]{3,160})"
+)
+
+
+def _all_field_labels() -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            set(_LOCATION_LABELS) | set(_NOTE_LABELS) | set(_SKIP_LABELS),
+            key=len,
+            reverse=True,
+        )
+    )
+
+
+_FIELD_LABEL_RE = re.compile(
+    r"(?i)(?P<label>" + "|".join(re.escape(label) for label in _all_field_labels()) + r")\s*[:：]"
+)
+
+
+def _clip_field(value: str, limit: int) -> str:
+    value = (value or "").strip(" \t\r\n，,;；|-")
+    if not value:
+        return ""
+    value = value.split("\n\n")[0]
+    value = re.sub(r"[ \t]+", " ", value)
+    value = re.sub(r"\n+", " ", value).strip()
+    if len(value) > limit:
+        cut = value[:limit]
+        value = cut.rsplit(" ", 1)[0] if " " in cut else cut
+    return value.strip(" ，,;；")
+
+
+def _clean_loc(value: str) -> str:
+    value = _clip_field(value, 255)
+    value = value.replace("，", " ").replace("、", " ").replace("；", " ")
+    value = re.sub(r"[ \t,]+", " ", value).strip(" ,")
+    return value[:255]
+
+
+def _is_dateish(value: str) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return True
+    return bool(_DATEISH_LOC.match(text)) and len(text) < 40
+
+
+def _norm_label(label: str) -> str:
+    return re.sub(r"\s+", " ", (label or "").strip().lower())
+
+
+def _labeled_fields(text: str) -> list[tuple[str, str]]:
+    matches = list(_FIELD_LABEL_RE.finditer(text or ""))
+    rows: list[tuple[str, str]] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        value = _clip_field(text[match.end() : end], 400)
+        if value:
+            rows.append((_norm_label(match["label"]), value))
+    return rows
+
+
+def _join_place(*parts: str) -> str:
+    seen: list[str] = []
+    blob = ""
+    for part in parts:
+        piece = _clean_loc(part)
+        if not piece or _is_dateish(piece):
+            continue
+        lowered = piece.casefold()
+        if blob and lowered in blob.casefold():
+            continue
+        if any(lowered == item.casefold() for item in seen):
+            continue
+        seen.append(piece)
+        blob = " ".join(seen)
+    return blob[:255]
+
+
+def _meet_urls(text: str) -> list[str]:
+    urls: list[str] = []
+    seen: set[str] = set()
+    for match in _MEET_URL.finditer(text or ""):
+        url = match.group(0).rstrip(").,;；，]>\"'")
+        key = url.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        urls.append(url)
+    return urls
+
+
+def _fallback_location(text: str) -> str:
+    en = _EN_AT_PLACE.search(text or "")
+    if en:
+        return _clean_loc(en.group(1))
+    cn = _CN_AT_PLACE.search(text or "")
+    if cn:
+        return _clean_loc(cn.group(1))
+    return ""
+
+
+def _extra_floor_room(text: str, location: str) -> str:
+    blob = location or ""
+    floor = ""
+    room = ""
+    floor_match = _FLOOR_TOKEN.search(text or "")
+    if floor_match:
+        number = floor_match.group(1) or floor_match.group(2)
+        token = floor_match.group(0)
+        floor = token if "楼" in token else f"Floor {number}"
+    room_match = _EN_ROOM.search(text or "") or _CN_ROOM.search(text or "")
+    if room_match:
+        room = _clean_loc(room_match.group(0))
+    else:
+        code = _ROOM_CODE.search(text or "")
+        if code:
+            room = code.group(1)
+    return _join_place(blob, floor, room)
+
+
+def extract_location_notes(subject: str, body: str) -> tuple[str, str]:
+    """Pull venue/location and extra instructions from any CN/EN event mail."""
+    text = html_to_text("\n".join(part for part in (subject, body) if part))
+    if not text:
+        return "", ""
+
+    loc_labels = {_norm_label(label) for label in _LOCATION_LABELS}
+    note_labels = {_norm_label(label) for label in _NOTE_LABELS}
+    skip_labels = {_norm_label(label) for label in _SKIP_LABELS}
+    venue_parts: list[str] = []
+    building = ""
+    room = ""
+    floor = ""
+    note_lines: list[str] = []
+    note_seen: set[str] = set()
+
+    def add_note(label: str, value: str) -> None:
+        text_value = _clip_field(value, 400)
+        if not text_value:
+            return
+        key = fold_search(text_value)
+        if key in note_seen:
+            return
+        note_seen.add(key)
+        pretty = label.strip()
+        line = f"{pretty}：{text_value}" if pretty else text_value
+        note_lines.append(line[:420])
+
+    for label, value in _labeled_fields(text):
+        if label in skip_labels:
+            continue
+        if label in loc_labels:
+            if label in {"building", "大楼", "大厦"}:
+                building = building or value
+            elif label in {"room", "教室", "会议室", "室", "hall"}:
+                room = room or value
+            elif label in {"楼层", "楼"}:
+                floor = floor or value
+            else:
+                venue_parts.append(value)
+            continue
+        if label in note_labels:
+            add_note(label, value)
+
+    location = _join_place(*(venue_parts + [building, floor, room]))
+    if not location:
+        location = _fallback_location(text)
+    if location:
+        location = _extra_floor_room(text, location)
+    elif building or room or floor:
+        location = _join_place(building, floor, room)
+
+    urls = _meet_urls(text)
+    first_url = urls[0] if urls else ""
+    if location and _ONLINE_LOC.match(location) and first_url:
+        location = _join_place(location, first_url)
+    elif not location and first_url:
+        location = first_url[:255]
+    for url in urls:
+        if location and url.casefold() in location.casefold():
+            continue
+        add_note("链接", url)
+
+    for match in _NOTE_LOOSE.finditer(text):
+        snippet = _clip_field(match.group(1), 200)
+        if snippet and not _is_dateish(snippet):
+            add_note("", snippet)
+
+    notes = "\n".join(note_lines).strip()[:2000]
+    if location and notes:
+        kept: list[str] = []
+        for line in notes.split("\n"):
+            payload = re.sub(r"^[^：:]{1,20}[:：]\s*", "", line).strip()
+            if payload and payload.casefold() in location.casefold() and len(payload) <= len(location):
+                continue
+            kept.append(line)
+        notes = "\n".join(kept).strip()
+    return location, notes
+
+
+def attach_location_notes(
+    events: list[ExtractedEvent],
+    subject: str,
+    body: str,
+) -> list[ExtractedEvent]:
+    if not events:
+        return events
+    location, notes = extract_location_notes(subject, body)
+    for event in events:
+        if not event.location:
+            event.location = location
+        if not event.notes:
+            event.notes = notes
+    return events
 
 
 def local_tz() -> ZoneInfo:
@@ -594,7 +872,7 @@ def extract_events(
             continue
         seen.add(key)
         unique.append(event)
-    return unique
+    return attach_location_notes(unique, subject, body)
 
 
 _HOMEWORK = re.compile(
@@ -703,7 +981,7 @@ def extract_tasks(
     consider(_HOMEWORK, "homework", 0.16, allow_with_dates=True)
     consider(_MEET_OPEN, "meet", 0.12, allow_with_dates=False)
     consider(_FOLLOW, "followup", 0.08, allow_with_dates=False)
-    return tasks
+    return attach_location_notes(tasks, subject, body)
 
 
 _KEEP_HINTS = (
@@ -745,7 +1023,7 @@ def extract_promo(
     snippet = _clip_snippet(text, match.start(), match.end()) if match else text[:160]
     title = (subject or matched).strip()[:80] or "促销邮件"
     start = received_at.replace(hour=0, minute=0, second=0, microsecond=0)
-    return [
+    items = [
         ExtractedEvent(
             title=title,
             start=start,
@@ -759,6 +1037,7 @@ def extract_promo(
             task_type="ad",
         )
     ]
+    return attach_location_notes(items, subject, body)
 
 
 def extract_all(

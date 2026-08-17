@@ -64,6 +64,12 @@ def test_home_and_static():
         assert "title_zh" in js.text
         assert "snippet_zh" in js.text
         assert "priorityHigh" in js.text
+        assert "data-field=location" in js.text
+        assert "data-field=notes" in js.text
+        assert "地点" in js.text
+        assert "备注" in js.text
+        assert "location: \"Location\"" in js.text
+        assert "notes: \"Notes\"" in js.text
         assert "currentMailbox = \"\"" in js.text
         assert "mailboxHint" in home.text
         assert "讲座通知" not in js.text
@@ -129,7 +135,8 @@ def test_language_setting_and_demo_cannot_open_mail():
 
         scan = client.post("/api/scan", json={"demo": True})
         assert scan.status_code == 200
-        item = client.get("/api/candidates?status=pending").json()["items"][0]
+        items = client.get("/api/candidates?status=pending").json()["items"]
+        item = next(row for row in items if str(row.get("email_id") or "").startswith("demo-"))
         assert item["can_open_mail"] is False
         assert item.get("title_zh")
         assert any("\u4e00" <= ch <= "\u9fff" for ch in item["title_zh"])
@@ -691,6 +698,9 @@ def test_meeting_invite_with_date_becomes_candidate():
     assert items[0]["kind"] == "event"
     assert "2026-08-20" in items[0]["start_at"]
     assert items[0]["title_zh"]
+    assert "Alumni Hall" in (items[0].get("location") or "")
+    assert "Alumni Hall" in (items[0].get("location") or "")
+    assert "Alumni Hall" in (items[0].get("location") or "")
 
 
 def test_regular_mail_with_meeting_status_is_not_dropped():
@@ -780,3 +790,78 @@ def test_search_ranks_latest_received_first():
     }
     merged = _merge([older], [newer], limit=12)
     assert merged[0]["email_id"] == "new"
+
+
+def test_classic_calendar_sets_location_and_keeps_body():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from save_dates.outlook_client import create_calendar_event_with_app
+
+    class Appt:
+        EntryID = ""
+
+        def Save(self):
+            self.EntryID = "cal-1"
+
+    class App:
+        def CreateItem(self, kind):
+            assert kind == 1
+            self.item = Appt()
+            return self.item
+
+    app = App()
+    start = datetime(2026, 8, 20, 9, 0, tzinfo=ZoneInfo("America/New_York"))
+    entry = create_calendar_event_with_app(
+        app,
+        "Orientation",
+        start,
+        start.replace(hour=10),
+        False,
+        body="入口：Fifth Avenue\n要带：手机",
+        location="Public Health Building 5楼 A521/A522",
+    )
+    assert entry == "cal-1"
+    assert app.item.Subject == "Orientation"
+    assert "Public Health Building" in app.item.Location
+    assert "入口" in app.item.Body
+    assert "要带" in app.item.Body
+
+    empty = App()
+    create_calendar_event_with_app(
+        empty,
+        "Deadline",
+        start,
+        start.replace(hour=10),
+        True,
+        body="来源邮件：截止",
+        location="",
+    )
+    assert not hasattr(empty.item, "Location")
+    assert empty.item.Body == "来源邮件：截止"
+
+
+def test_accept_event_writes_location_and_notes(monkeypatch):
+    captured = {}
+
+    def fake_create_event(**kwargs):
+        captured.update(kwargs)
+        return "cal-1"
+
+    monkeypatch.setattr("save_dates.server.watcher.create_event", fake_create_event)
+    with TestClient(app) as client:
+        client.post("/api/scan", json={"demo": True})
+        items = client.get("/api/candidates?status=pending").json()["items"]
+        event = next(item for item in items if item.get("kind") == "event")
+        patched = client.patch(
+            f"/api/candidates/{event['id']}",
+            json={"location": "Room 101", "notes": "Bring ID and a charged laptop"},
+        )
+        assert patched.status_code == 200
+        assert patched.json()["item"]["location"] == "Room 101"
+        assert "Bring ID" in patched.json()["item"]["notes"]
+        accepted = client.post(f"/api/candidates/{event['id']}/accept")
+        assert accepted.status_code == 200
+        assert captured["location"] == "Room 101"
+        assert "Bring ID" in captured["body"]
+        assert captured["title"]

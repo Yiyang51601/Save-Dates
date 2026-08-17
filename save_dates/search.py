@@ -13,7 +13,7 @@ from save_dates.display_title import attach_display_titles
 from save_dates.extract import match_threshold, score_search_fields, snippet_around_query
 from save_dates.priority import attach_priority
 
-SEARCH_FIELDS = ("subject", "snippet", "title", "sender", "matched_text")
+SEARCH_FIELDS = ("subject", "snippet", "title", "sender", "matched_text", "location", "notes")
 
 
 def _clip_query(query: str) -> str:

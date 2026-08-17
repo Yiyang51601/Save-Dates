@@ -216,3 +216,89 @@ def test_fuzzy_orientation_accepts_typo():
     assert "orient" in fragment
     assert unrelated < match_threshold("orientation")
     assert fuzzy_score("讲座", "本周五下午3点举办讲座，欢迎参加。") == 1.0
+
+
+def test_extracts_location_and_notes_from_labeled_event_mail():
+    from save_dates.extract import extract_location_notes
+
+    subject = "SPH epi new student Orientation"
+    body = (
+        "时间：2026年8月20日（周四）\n"
+        "地点：Public Health Building 5楼，A521/A522\n"
+        "入口：建议从 Fifth Avenue 入口进（大雕塑正下方）\n"
+        "要带：充满电的手机、平板或电脑，现场有活动需要使用。"
+    )
+    event = _first(subject, body)
+    assert event.start.year == 2026
+    assert event.start.month == 8
+    assert event.start.day == 20
+    location, notes = extract_location_notes(subject, body)
+    assert "Public Health Building" in location
+    assert "A521" in location
+    assert "5楼" in location
+    assert "入口" in notes
+    assert "Fifth Avenue" in notes
+    assert "要带" in notes or "手机" in notes
+    assert event.location == location
+    assert event.notes == notes
+    assert "Orientation" in event.title
+
+
+def test_extracts_english_venue_rsvp_and_what_to_bring():
+    event = _first(
+        "Campus lecture",
+        "Join us on August 21, 2026 at 3:00 PM.\n"
+        "Venue: Alumni Hall Room 200\n"
+        "RSVP: please reply by Wednesday\n"
+        "What to bring: student ID",
+    )
+    assert event.start.day == 21
+    assert "Alumni Hall" in event.location
+    assert "200" in event.location
+    assert "RSVP" in event.notes or "reply" in event.notes.lower()
+    assert "student ID" in event.notes
+
+
+def test_zoom_link_becomes_location_when_no_physical_place():
+    event = _first(
+        "Seminar",
+        "Seminar on August 22, 2026 at 10:00 AM\n"
+        "Join Zoom: https://pitt.zoom.us/j/123456789",
+    )
+    assert "zoom.us" in event.location.lower()
+    assert event.start.day == 22
+
+
+def test_physical_place_keeps_zoom_in_notes():
+    event = _first(
+        "Hybrid meeting",
+        "Meeting on August 23, 2026 at 2:00 PM\n"
+        "Location: Cathedral of Learning Room 332\n"
+        "Zoom: https://pitt.zoom.us/j/987654321",
+    )
+    assert "Cathedral of Learning" in event.location
+    assert "332" in event.location
+    assert "zoom.us" in event.notes.lower()
+    assert "zoom.us" not in event.location.lower()
+
+
+def test_building_and_room_labels_are_combined():
+    event = _first(
+        "Office hours",
+        "August 24, 2026 at 11:00 AM\nBuilding: Public Health Building\nRoom: A521/A522",
+    )
+    assert "Public Health Building" in event.location
+    assert "A521" in event.location
+
+
+def test_empty_location_and_notes_when_mail_has_none():
+    event = _first("Deadline", "截止日期：2026-09-01。")
+    assert event.start.date().isoformat() == "2026-09-01"
+    assert event.location == ""
+    assert event.notes == ""
+
+
+def test_chinese_unlabeled_hall_is_location():
+    event = _first("讲座通知", "将于2026年8月20日下午3点在大礼堂举办讲座，欢迎参加。")
+    assert "礼堂" in event.location
+    assert event.start.hour == 15

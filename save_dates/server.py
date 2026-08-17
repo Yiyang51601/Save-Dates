@@ -72,6 +72,8 @@ class CandidatePatch(BaseModel):
     start_at: str | None = None
     end_at: str | None = None
     all_day: bool | None = None
+    location: str | None = None
+    notes: str | None = None
 
 
 class SettingsPatch(BaseModel):
@@ -105,6 +107,8 @@ class SearchPinRequest(BaseModel):
     kind: str = "event"
     task_type: str = ""
     mailbox: str = ""
+    location: str = ""
+    notes: str = ""
 
 
 class SearchOpenRequest(BaseModel):
@@ -179,6 +183,8 @@ def _demo_candidates(lang: str = "zh") -> list[dict]:
                 "kind": "event",
                 "task_type": "",
                 "mailbox": "yuan@school.edu",
+                "location": "the auditorium",
+                "notes": "",
             },
             {
                 "email_id": f"demo-{stamp}-2",
@@ -255,6 +261,8 @@ def _demo_candidates(lang: str = "zh") -> list[dict]:
                 "kind": "event",
                 "task_type": "",
                 "mailbox": "yuan@school.edu",
+                "location": "the auditorium",
+                "notes": "Please come to the auditorium this Friday at 3:00 PM.",
             },
         ]
     return [
@@ -276,6 +284,8 @@ def _demo_candidates(lang: str = "zh") -> list[dict]:
             "kind": "event",
             "task_type": "",
             "mailbox": "yuan@school.edu",
+            "location": "大礼堂",
+            "notes": "",
         },
         {
             "email_id": f"demo-{stamp}-2",
@@ -352,6 +362,8 @@ def _demo_candidates(lang: str = "zh") -> list[dict]:
             "kind": "event",
             "task_type": "",
             "mailbox": "yuan@school.edu",
+            "location": "大礼堂",
+            "notes": "",
         },
     ]
 
@@ -574,13 +586,21 @@ def _source_body(item: dict) -> str:
     )
 
 
+def _write_body(item: dict) -> str:
+    notes = str(item.get("notes") or "").strip()
+    source = _source_body(item)
+    if notes and notes not in source:
+        return f"{notes}\n\n{source}"
+    return source
+
+
 def _accept_one(candidate_id: int) -> dict:
     item = db.get_candidate(candidate_id)
     if not item:
         raise HTTPException(status_code=404, detail="candidate_missing")
     if item["status"] == "accepted":
         return item
-    body = _source_body(item)
+    body = _write_body(item)
     if (item.get("kind") or "event") == "promo":
         entry_id = ""
         try:
@@ -609,6 +629,7 @@ def _accept_one(candidate_id: int) -> dict:
             end=end,
             all_day=bool(item["all_day"]),
             body=body,
+            location=str(item.get("location") or ""),
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail="calendar_write_failed") from exc

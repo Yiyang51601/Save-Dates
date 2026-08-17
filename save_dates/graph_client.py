@@ -87,6 +87,8 @@ def message_to_candidates(
                 "fuzzy": event.fuzzy,
                 "kind": event.kind,
                 "task_type": event.task_type,
+                "location": event.location or "",
+                "notes": event.notes or "",
             }
         )
         for event in events
@@ -267,11 +269,12 @@ def create_calendar_event(
     end: datetime,
     all_day: bool,
     body: str,
+    location: str = "",
 ) -> str:
     tz_name = str(local_tz())
     payload = {
         "subject": title[:255],
-        "body": {"contentType": "text", "content": body},
+        "body": {"contentType": "text", "content": body or ""},
         "start": {"dateTime": _wall_time(start), "timeZone": tz_name},
         "end": {"dateTime": _wall_time(end), "timeZone": tz_name},
         "isAllDay": bool(all_day),
@@ -282,6 +285,9 @@ def create_calendar_event(
             REMINDER_MINUTES_ALL_DAY if all_day else REMINDER_MINUTES_TIMED
         ),
     }
+    loc = (location or "").strip()
+    if loc:
+        payload["location"] = {"displayName": loc[:255]}
     data = graph_request("POST", f"{GRAPH_ROOT}/me/events", token, json=payload)
     return str(data.get("id") or "")
 

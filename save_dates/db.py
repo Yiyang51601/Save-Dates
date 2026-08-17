@@ -78,6 +78,10 @@ def init_db() -> None:
                 conn.execute("ALTER TABLE candidates ADD COLUMN task_type TEXT NOT NULL DEFAULT ''")
             if "mailbox" not in cols:
                 conn.execute("ALTER TABLE candidates ADD COLUMN mailbox TEXT NOT NULL DEFAULT ''")
+            if "location" not in cols:
+                conn.execute("ALTER TABLE candidates ADD COLUMN location TEXT NOT NULL DEFAULT ''")
+            if "notes" not in cols:
+                conn.execute("ALTER TABLE candidates ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
             conn.execute("DROP INDEX IF EXISTS idx_pending_unique")
             conn.execute(
                 """
@@ -145,6 +149,8 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     item["kind"] = item.get("kind") or "event"
     item["task_type"] = item.get("task_type") or ""
     item["mailbox"] = item.get("mailbox") or ""
+    item["location"] = item.get("location") or ""
+    item["notes"] = item.get("notes") or ""
     email_id = str(item.get("email_id") or "")
     mail_url = str(item.get("mail_url") or "")
     item["can_open_mail"] = (bool(email_id) and not email_id.startswith("demo-")) or bool(mail_url)
@@ -266,8 +272,8 @@ def insert_candidates(items: list[dict[str, Any]]) -> int:
                         INSERT INTO candidates (
                             email_id, internet_id, store_id, mail_url, subject, sender, received_at,
                             title, start_at, end_at, all_day, snippet, matched_text,
-                            confidence, fuzzy, kind, task_type, mailbox, status, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                            confidence, fuzzy, kind, task_type, mailbox, location, notes, status, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
                         """,
                         (
                             item["email_id"],
@@ -288,6 +294,8 @@ def insert_candidates(items: list[dict[str, Any]]) -> int:
                             item.get("kind") or "event",
                             item.get("task_type") or "",
                             item.get("mailbox") or "",
+                            item.get("location") or "",
+                            item.get("notes") or "",
                             now,
                         ),
                     )
@@ -301,7 +309,7 @@ def insert_candidates(items: list[dict[str, Any]]) -> int:
 
 
 def update_candidate(candidate_id: int, fields: dict[str, Any]) -> dict[str, Any] | None:
-    allowed = {"title", "start_at", "end_at", "all_day"}
+    allowed = {"title", "start_at", "end_at", "all_day", "location", "notes"}
     updates = {k: v for k, v in fields.items() if k in allowed}
     if "all_day" in updates:
         updates["all_day"] = 1 if updates["all_day"] else 0

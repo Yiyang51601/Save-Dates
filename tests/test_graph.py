@@ -63,6 +63,7 @@ def test_graph_meeting_invite_with_date_is_kept():
     assert items
     assert "2026-08-20" in items[0]["start_at"]
     assert items[0]["title_zh"]
+    assert "Alumni Hall" in (items[0].get("location") or "")
 
 
 def test_graph_auth_is_public_native_client():
@@ -79,3 +80,54 @@ def test_graph_auth_is_public_native_client():
     assert "http://localhost" in source
     assert "client_secret" not in source
     assert "client_credential" not in source
+
+
+def test_graph_calendar_payload_includes_location_and_body(monkeypatch):
+    from datetime import datetime, timedelta
+
+    from save_dates import graph_client
+
+    captured = {}
+
+    def fake_request(method, url, token, json=None):
+        captured["json"] = json
+        return {"id": "evt-1"}
+
+    monkeypatch.setattr(graph_client, "graph_request", fake_request)
+    start = datetime(2026, 8, 20, 9, 0, tzinfo=TZ)
+    event_id = graph_client.create_calendar_event(
+        "tok",
+        "SPH Orientation",
+        start,
+        start + timedelta(hours=1),
+        False,
+        body="入口：建议从 Fifth Avenue 入口进\n要带：充满电的手机",
+        location="Public Health Building 5楼 A521/A522",
+    )
+    payload = captured["json"]
+    assert event_id == "evt-1"
+    assert payload["subject"] == "SPH Orientation"
+    assert payload["location"]["displayName"].startswith("Public Health")
+    assert "A521" in payload["location"]["displayName"]
+    assert "入口" in payload["body"]["content"]
+    assert "要带" in payload["body"]["content"]
+
+
+def test_graph_calendar_omits_empty_location(monkeypatch):
+    from datetime import datetime, timedelta
+
+    from save_dates import graph_client
+
+    captured = {}
+
+    def fake_request(method, url, token, json=None):
+        captured["json"] = json
+        return {"id": "evt-2"}
+
+    monkeypatch.setattr(graph_client, "graph_request", fake_request)
+    start = datetime(2026, 9, 1, tzinfo=TZ)
+    graph_client.create_calendar_event(
+        "tok", "Deadline", start, start + timedelta(days=1), True, body="source", location=""
+    )
+    assert "location" not in captured["json"]
+    assert captured["json"]["body"]["content"] == "source"
