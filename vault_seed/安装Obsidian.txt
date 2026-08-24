@@ -1,7 +1,7 @@
 安装 Obsidian 到 D:（给从没装过的人）
 
 目标：
-  程序：D:\Apps\Obsidian
+  程序：D:\Obsidian
   笔记库：D:\Notes\Pitt   ← Save Dates 会写入这里
 
 本说明只写点击步骤。不要用商店里来路不明的「笔记」应用替代官网安装包。
@@ -17,7 +17,7 @@
    选最新的 Obsidian-x.x.x.exe（Windows）。
 
 
-二、安装到 D:\Apps\Obsidian
+二、安装到 D:\Obsidian
 
 安装向导因版本可能略有不同，按接近的选项点：
 
@@ -25,7 +25,7 @@
 2. 若智能屏幕提示，选「仍要运行」。
 3. 许可协议：接受。
 4. 安装位置 / Destination folder：
-     浏览（Browse）→ 选 D:\Apps\Obsidian
+     浏览（Browse）→ 选 D:\Obsidian
      若没有 Apps 文件夹：在 D:\ 新建文件夹 Apps，再选它。
    有的安装包会先装到用户目录，然后再「Open」。
    若向导没有「改路径」：
@@ -37,8 +37,8 @@
 三、便携版（可选，全部都在 D:）
 
 1. 在 GitHub Releases 下载 Windows .exe 后，有的版本可解压/安装到
-     D:\Apps\Obsidian
-2. 以后从 D:\Apps\Obsidian\Obsidian.exe 打开。
+     D:\Obsidian
+2. 以后从 D:\Obsidian\Obsidian.exe 打开。
 3. 笔记仍然放在 D:\Notes\Pitt，不要把库建在 C:\Users\... 里，除非你想跟着用户目录走。
 
 
