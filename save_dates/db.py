@@ -627,18 +627,23 @@ def get_settings() -> dict[str, Any]:
         data.get("obsidian_vault_path") or data.get("obsidian_vault") or ""
     ).strip() or str(default_vault_path())
     if "obsidian_export_on_join" in data:
-        obsidian_export_on_join = bool(data["obsidian_export_on_join"])
+        obsidian_write = bool(data["obsidian_export_on_join"])
     elif "obsidian_write" in data:
-        obsidian_export_on_join = bool(data["obsidian_write"])
+        obsidian_write = bool(data["obsidian_write"])
     else:
-        obsidian_export_on_join = True
+        try:
+            obsidian_write = Path(vault).is_dir()
+        except OSError:
+            obsidian_write = False
     return {
         "lang": lang,
         "lang_set": lang_set,
         "backend": backend,
         "graph_client_id": client_id,
+        "obsidian_vault": vault,
         "obsidian_vault_path": vault,
-        "obsidian_export_on_join": obsidian_export_on_join,
+        "obsidian_write": obsidian_write,
+        "obsidian_export_on_join": obsidian_write,
     }
 
 
@@ -675,14 +680,23 @@ def save_settings(patch: dict[str, Any]) -> dict[str, Any]:
 
         vault = str(patch["obsidian_vault"]).strip() or str(default_vault_path())
     if vault:
+        out["obsidian_vault"] = vault
         out["obsidian_vault_path"] = vault
     if "obsidian_export_on_join" in patch and patch["obsidian_export_on_join"] is not None:
-        out["obsidian_export_on_join"] = bool(patch["obsidian_export_on_join"])
+        flag = bool(patch["obsidian_export_on_join"])
+        out["obsidian_export_on_join"] = flag
+        out["obsidian_write"] = flag
     elif "obsidian_write" in patch and patch["obsidian_write"] is not None:
-        out["obsidian_export_on_join"] = bool(patch["obsidian_write"])
+        flag = bool(patch["obsidian_write"])
+        out["obsidian_export_on_join"] = flag
+        out["obsidian_write"] = flag
     elif "obsidian_export_on_join" in data:
-        out["obsidian_export_on_join"] = bool(data["obsidian_export_on_join"])
+        flag = bool(data["obsidian_export_on_join"])
+        out["obsidian_export_on_join"] = flag
+        out["obsidian_write"] = flag
     elif "obsidian_write" in data:
-        out["obsidian_export_on_join"] = bool(data["obsidian_write"])
+        flag = bool(data["obsidian_write"])
+        out["obsidian_export_on_join"] = flag
+        out["obsidian_write"] = flag
     SETTINGS_PATH.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     return get_settings()

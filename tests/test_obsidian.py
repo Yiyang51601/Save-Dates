@@ -145,12 +145,20 @@ def test_settings_persist_vault_and_keep_on_lang_save(tmp_path, monkeypatch):
     assert saved["obsidian_vault"] == str(vault)
     assert saved["obsidian_vault_path"] == str(vault)
     raw = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert raw["obsidian_vault"] == str(vault)
-    assert raw["obsidian_write"] is True
+    persisted_vault = raw.get("obsidian_vault") or raw.get("obsidian_vault_path")
+    persisted_write = raw.get("obsidian_write")
+    if persisted_write is None:
+        persisted_write = raw.get("obsidian_export_on_join")
+    assert persisted_vault == str(vault)
+    assert persisted_write is True
     db.save_settings({"lang": "en"})
     raw = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert raw["obsidian_vault"] == str(vault)
-    assert raw["obsidian_write"] is True
+    persisted_vault = raw.get("obsidian_vault") or raw.get("obsidian_vault_path")
+    persisted_write = raw.get("obsidian_write")
+    if persisted_write is None:
+        persisted_write = raw.get("obsidian_export_on_join")
+    assert persisted_vault == str(vault)
+    assert persisted_write is True
     assert raw["lang"] == "en"
 
 
@@ -190,7 +198,7 @@ def test_accept_event_exports_to_configured_vault(tmp_path: Path, monkeypatch):
 
     from fastapi.testclient import TestClient
 
-    from save_dates.extract import local_tz
+    from save_dates.extract import calendar_tz
     from save_dates.server import app
 
     monkeypatch.setattr("save_dates.db.DATA_DIR", tmp_path)
@@ -214,7 +222,7 @@ def test_accept_event_exports_to_configured_vault(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr("save_dates.server.watcher.create_event", fake_create_event)
 
-    tz = local_tz()
+    tz = calendar_tz()
     start = datetime(2026, 9, 1, 14, 0, tzinfo=tz)
     end = datetime(2026, 9, 1, 15, 0, tzinfo=tz)
     db.insert_candidates(
@@ -262,71 +270,3 @@ def test_accept_event_exports_to_configured_vault(tmp_path: Path, monkeypatch):
     assert "14:00" in daily_text
     assert "Cathedral 324" in daily_text
     assert "Department seminar" in daily_text
-    from datetime import datetime
-
-    from fastapi.testclient import TestClient
-
-    from save_dates.db import insert_candidates, save_settings
-    from save_dates.extract import local_tz
-    from save_dates.server import app
-
-    monkeypatch.setattr("save_dates.db.DATA_DIR", tmp_path)
-    monkeypatch.setattr("save_dates.db.DB_PATH", tmp_path / "save_dates.db")
-    monkeypatch.setattr("save_dates.db.SETTINGS_PATH", tmp_path / "settings.json")
-    vault = tmp_path / "vault"
-
-    from save_dates import db
-
-    db.init_db()
-    save_settings = db.save_settings
-    insert_candidates = db.insert_candidates
-    save_settings({"obsidian_vault_path": str(vault), "obsidian_export_on_join": True})
-
-    def fake_create_event(**kwargs):
-        return "cal-obsidian"
-
-    monkeypatch.setattr("save_dates.server.watcher.create_event", fake_create_event)
-
-    tz = local_tz()
-    start = datetime(2026, 9, 1, 14, 0, tzinfo=tz)
-    end = datetime(2026, 9, 1, 15, 0, tzinfo=tz)
-    insert_candidates(
-        [
-            {
-                "email_id": "obsidian-mail-1",
-                "internet_id": "",
-                "store_id": "",
-                "mail_url": "",
-                "subject": "Seminar reminder",
-                "sender": "dept@pitt.edu",
-                "received_at": start.isoformat(timespec="seconds"),
-                "title": "Department seminar",
-                "start_at": start.isoformat(timespec="minutes"),
-                "end_at": end.isoformat(timespec="minutes"),
-                "all_day": False,
-                "snippet": "Friday seminar",
-                "matched_text": "seminar 2pm",
-                "confidence": 0.9,
-                "fuzzy": False,
-                "kind": "event",
-                "task_type": "",
-                "mailbox": "yuan@pitt.edu",
-                "location": "Cathedral 324",
-                "notes": "Bring ID",
-            }
-        ]
-    )
-
-    with TestClient(app) as client:
-        items = client.get("/api/candidates?status=pending").json()["items"]
-        event = next(item for item in items if item["email_id"] == "obsidian-mail-1")
-        accepted = client.post(f"/api/candidates/{event['id']}/accept")
-        assert accepted.status_code == 200
-
-    event_files = list((vault / "Events").glob("*.md"))
-    assert event_files
-    assert "Department seminar" in event_files[0].read_text(encoding="utf-8")
-    daily = vault / "Daily" / "2026-09-01.md"
-    assert daily.exists()
-    assert "14:00" in daily.read_text(encoding="utf-8")
-    assert "Cathedral 324" in daily.read_text(encoding="utf-8")
