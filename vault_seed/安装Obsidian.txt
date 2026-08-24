@@ -1,0 +1,68 @@
+安装 Obsidian 到 D:（给从没装过的人）
+
+目标：
+  程序：D:\Apps\Obsidian
+  笔记库：D:\Notes\Pitt   ← Save Dates 会写入这里
+
+本说明只写点击步骤。不要用商店里来路不明的「笔记」应用替代官网安装包。
+
+
+一、下载
+
+1. 打开浏览器，访问：https://obsidian.md
+2. 点页面上的 Download（下载）。
+3. 选 Windows。保存安装包（文件名类似 Obsidian-1.x.x.exe）。
+   也可从 GitHub 发布页下载：
+   https://github.com/obsidianmd/obsidian-releases/releases
+   选最新的 Obsidian-x.x.x.exe（Windows）。
+
+
+二、安装到 D:\Apps\Obsidian
+
+安装向导因版本可能略有不同，按接近的选项点：
+
+1. 双击下载好的 .exe。
+2. 若智能屏幕提示，选「仍要运行」。
+3. 许可协议：接受。
+4. 安装位置 / Destination folder：
+     浏览（Browse）→ 选 D:\Apps\Obsidian
+     若没有 Apps 文件夹：在 D:\ 新建文件夹 Apps，再选它。
+   有的安装包会先装到用户目录，然后再「Open」。
+   若向导没有「改路径」：
+     - 先按默认装完；
+     - 或改下便携方式（第三节）。
+5. 安装完成后不要急着新建空库。
+
+
+三、便携版（可选，全部都在 D:）
+
+1. 在 GitHub Releases 下载 Windows .exe 后，有的版本可解压/安装到
+     D:\Apps\Obsidian
+2. 以后从 D:\Apps\Obsidian\Obsidian.exe 打开。
+3. 笔记仍然放在 D:\Notes\Pitt，不要把库建在 C:\Users\... 里，除非你想跟着用户目录走。
+
+
+四、第一次打开「Pitt」库（三步）
+
+1. 打开 Obsidian。
+2. 欢迎页选 Open folder as vault
+   （打开文件夹作为库 / Open folder as vault）。
+   若已经在某个库里：左下角库名 → Open vault from folder /
+   菜单 File → Open vault → Open folder as vault。
+3. 选中文件夹 D:\Notes\Pitt → 选择文件夹。
+
+左侧应能看到：00-开始这里.md、Inbox、Daily、Events、课程、GSR、生活。
+先点开 00-开始这里.md。
+
+
+五、和 Save Dates 的关系
+
+- 日历提醒：Outlook。
+- 点 Save Dates「加入」：Outlook + 本库 Events/ 与 Daily/。
+- 不要把 Obsidian 当成第二个日历。
+
+
+六、卸载（以后如果不用了）
+
+Windows 设置 → 应用 → Obsidian → 卸载。
+笔记在 D:\Notes\Pitt，卸载软件不会自动删笔记；要删请自己进资源管理器删文件夹。

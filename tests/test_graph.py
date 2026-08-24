@@ -111,6 +111,9 @@ def test_graph_calendar_payload_includes_location_and_body(monkeypatch):
     assert "A521" in payload["location"]["displayName"]
     assert "入口" in payload["body"]["content"]
     assert "要带" in payload["body"]["content"]
+    assert payload["start"]["timeZone"] == "America/New_York"
+    assert payload["end"]["timeZone"] == "America/New_York"
+    assert payload["start"]["dateTime"].startswith("2026-08-20T09:00:00")
 
 
 def test_graph_calendar_truncates_overlong_location(monkeypatch):

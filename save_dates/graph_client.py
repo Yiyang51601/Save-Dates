@@ -23,6 +23,7 @@ from save_dates.config import (
 )
 from save_dates.display_title import attach_display_titles
 from save_dates.extract import (
+    calendar_tz,
     combine_extracted_events,
     extract_all,
     html_to_text,
@@ -288,10 +289,11 @@ def create_calendar_event(
     body: str,
     location: str = "",
 ) -> str:
-    tz_name = str(local_tz())
+    tz_name = str(calendar_tz())
     payload = {
         "subject": title[:255],
         "body": {"contentType": "text", "content": (body or "")[:BODY_CHAR_LIMIT]},
+        # Always America/New_York. Graph would otherwise use Windows/mailbox TZ (often still China).
         "start": {"dateTime": _wall_time(start), "timeZone": tz_name},
         "end": {"dateTime": _wall_time(end), "timeZone": tz_name},
         "isAllDay": bool(all_day),
@@ -599,7 +601,7 @@ def _parse_graph_dt(value: Any) -> datetime | None:
 
 
 def _wall_time(value: datetime) -> str:
-    tz = local_tz()
+    tz = calendar_tz()
     if value.tzinfo is None:
         local = value
     else:

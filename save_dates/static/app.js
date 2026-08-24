@@ -52,6 +52,18 @@ const STRINGS = {
     emails: "封",
     scanHint: "默认 180 天 / 500 封，最多 365 天 / 1000 封。",
     includeProcessed: "包含已处理邮件",
+    obsidianHint: "点「加入 / 记下」时，除了 Outlook 日历，还可同时写入本地 Obsidian 库（Events 一篇 + Daily 一行）。广告「清掉」不会写入。",
+    obsidianWrite: "加入日历时同时写入 Obsidian",
+    obsidianVault: "Obsidian 库路径",
+    saveObsidian: "保存库设置",
+    openVault: "打开库文件夹",
+    inboxPhotos: "整理 Inbox 照片",
+    obsidianSaved: "已保存 Obsidian 设置。",
+    obsidianVaultOk: "已找到这个库。点加入会写入 Events 和当天 Daily。",
+    obsidianVaultMissing: "这个文件夹还不存在。打开库或点加入时会自动创建子文件夹。",
+    inboxPhotosDone: "已为 {n} 张新图片生成笔记（只嵌入图片，不会识别文字）。",
+    inboxPhotosNone: "Inbox 里没有需要新建笔记的图片。",
+    obsidian_open_failed: "无法打开库文件夹。",
     scanBtn: "补扫",
     demoBtn: "示例",
     demoExitBtn: "退出示例",
@@ -200,6 +212,18 @@ const STRINGS = {
     emails: "emails",
     scanHint: "Default 180 days / 500 messages; max 365 days / 1000 messages.",
     includeProcessed: "Include processed mail",
+    obsidianHint: "On Add / Save, write the Outlook calendar as usual and also a local Obsidian note (one Events file + one Daily bullet). Clearing ads does not write notes.",
+    obsidianWrite: "Also write to Obsidian when adding to the calendar",
+    obsidianVault: "Obsidian vault path",
+    saveObsidian: "Save vault settings",
+    openVault: "Open vault folder",
+    inboxPhotos: "File Inbox photos",
+    obsidianSaved: "Obsidian settings saved.",
+    obsidianVaultOk: "Vault found. Add will write Events and that day's Daily note.",
+    obsidianVaultMissing: "This folder does not exist yet. It will be created when you open it or tap Add.",
+    inboxPhotosDone: "Created notes for {n} new image(s). Images are embedded; text is not OCR'd.",
+    inboxPhotosNone: "No new Inbox images needed a note.",
+    obsidian_open_failed: "Could not open the vault folder.",
     scanBtn: "Scan",
     demoBtn: "Sample",
     demoExitBtn: "Exit sample",
@@ -541,6 +565,7 @@ function applyStatus(s) {
   if (s.settings?.graph_client_id && !$("graphClientId").value) {
     $("graphClientId").value = s.settings.graph_client_id;
   }
+  fillObsidianSettings(s);
   $("msLoginBtn").classList.toggle("hidden", Boolean(s.graph_logged_in));
   $("msLogoutBtn").classList.toggle("hidden", !s.graph_logged_in);
   if (Array.isArray(s.mailboxes)) {
@@ -1497,6 +1522,67 @@ $("saveClientId").addEventListener("click", async () => {
       body: JSON.stringify({ graph_client_id: $("graphClientId").value.trim() }),
     });
     setBanner(t("saveClientId"));
+  } catch (err) {
+    setBanner(err.message, true);
+  }
+});
+
+function fillObsidianSettings(s) {
+  const vault = $("obsidianVault");
+  const write = $("obsidianWrite");
+  const status = $("obsidianStatus");
+  if (!vault || !write) return;
+  const settings = s?.settings || s || {};
+  if (document.activeElement !== vault) {
+    vault.value = settings.obsidian_vault_path || "";
+  }
+  if (document.activeElement !== write) {
+    write.checked = Boolean(settings.obsidian_export_on_join);
+  }
+  if (status) {
+    status.textContent = settings.obsidian_vault_exists ? t("obsidianVaultOk") : t("obsidianVaultMissing");
+  }
+}
+
+async function saveObsidianSettings() {
+  const vault = ($("obsidianVault")?.value || "").trim();
+  const write = Boolean($("obsidianWrite")?.checked);
+  await api("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify({
+      obsidian_vault: vault,
+      obsidian_write: write,
+      obsidian_vault_path: vault,
+      obsidian_export_on_join: write,
+    }),
+  });
+  setBanner(t("obsidianSaved"));
+  await refreshStatus();
+}
+
+$("obsidianWrite")?.addEventListener("change", () => {
+  saveObsidianSettings().catch((err) => setBanner(err.message, true));
+});
+
+$("saveObsidian")?.addEventListener("click", () => {
+  saveObsidianSettings().catch((err) => setBanner(err.message, true));
+});
+
+$("openVaultBtn")?.addEventListener("click", async () => {
+  try {
+    await saveObsidianSettings();
+    await api("/api/obsidian/open-vault", { method: "POST" });
+  } catch (err) {
+    setBanner(err.message, true);
+  }
+});
+
+$("inboxPhotosBtn")?.addEventListener("click", async () => {
+  try {
+    await saveObsidianSettings();
+    const result = await api("/api/obsidian/inbox-photos", { method: "POST" });
+    const n = (result.created || []).length;
+    setBanner(n ? t("inboxPhotosDone", { n }) : t("inboxPhotosNone"));
   } catch (err) {
     setBanner(err.message, true);
   }

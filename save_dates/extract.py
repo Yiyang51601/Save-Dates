@@ -346,9 +346,13 @@ def _is_org_name(value: str) -> bool:
 
 def _looks_like_venue(value: str) -> bool:
     text = (value or "").strip()
-    if not text or _is_dateish(text) or _is_org_name(text) or _is_form_url(text):
+    if not text or _is_dateish(text) or _is_org_name(text) or _is_form_url(text) or _is_email_loc(text):
         return False
     return bool(_VENUE_HINT.search(text) or _EN_NAMED_PLACE.search(text) or _ONLINE_LOC.match(text))
+
+
+def _is_email_loc(value: str) -> bool:
+    return bool(re.search(r"\b\S+@\S+\.\S+\b", value or ""))
 
 
 def _is_form_url(value: str) -> bool:
@@ -562,8 +566,9 @@ def extract_location_notes(subject: str, body: str) -> tuple[str, str]:
         location = _join_place(location, first_url)
     elif not location and first_url:
         location = first_url[:LOCATION_WRITE_MAX]
-    if location and _is_form_url(location):
-        add_note("RSVP", location, phrase=False)
+    if location and (_is_form_url(location) or _is_email_loc(location)):
+        if _is_form_url(location):
+            add_note("RSVP", location, phrase=False)
         location = ""
     for url in urls:
         if location and url.casefold() in location.casefold():
@@ -604,6 +609,16 @@ def attach_location_notes(
         if not event.notes:
             event.notes = notes
     return events
+
+
+def calendar_tz() -> ZoneInfo:
+    """Timezone used when writing calendar events.
+
+    Classic Outlook COM interprets naive Start/End in the Windows timezone
+    unless StartTimeZone/EndTimeZone are set. Keep this Eastern even if
+    Windows is still Asia/Shanghai.
+    """
+    return ZoneInfo("America/New_York")
 
 
 def local_tz() -> ZoneInfo:
@@ -739,12 +754,17 @@ def _valid_future(start: datetime, now: datetime) -> bool:
     return True
 
 
+_GENERIC_SUBJECT = re.compile(
+    r"^(?:通知|公告|转发|自动回复|fw|fwd|re)\s*[:：]?\s*$",
+    re.I,
+)
+
+
 def _title_from_context(subject: str, text: str, match_start: int, match_end: int) -> str:
     subject = (subject or "").strip()
-    if subject and not re.fullmatch(r"(通知|公告|转发|fw|fwd|re:.*|自动回复)", subject, re.I):
-        cleaned = re.sub(r"^(re|fw|fwd|转发)\s*[:：]\s*", "", subject, flags=re.I).strip()
-        if cleaned:
-            return cleaned[:80]
+    cleaned = re.sub(r"^(re|fw|fwd|转发)\s*[:：]\s*", "", subject, flags=re.I).strip()
+    if cleaned and not _GENERIC_SUBJECT.fullmatch(cleaned) and not _GENERIC_SUBJECT.fullmatch(subject):
+        return cleaned[:80]
     window = text[max(0, match_start - 40) : min(len(text), match_end + 80)]
     sentence = re.split(r"[。！？\n]", window)[0].strip(" ，,;；")
     sentence = re.sub(r"\s+", " ", sentence)
@@ -1435,14 +1455,10 @@ def same_event_family(left: dict, right: dict) -> bool:
     key_b = event_family_key(str(right.get("title") or ""), str(right.get("subject") or ""))
     if _family_match(key_a, key_b):
         return True
-    sender_a = fold_search(str(left.get("sender") or ""))
-    sender_b = fold_search(str(right.get("sender") or ""))
-    if sender_a and sender_a == sender_b and _orientationish(left) and _orientationish(right):
-        return _dates_close(str(left.get("start_at") or ""), str(right.get("start_at") or ""), days=21)
     score_ab, _ = score_search_fields(key_a, key_b)
     score_ba, _ = score_search_fields(key_b, key_a)
     if max(score_ab, score_ba) >= 0.85 and _orientationish(left) and _orientationish(right):
-        return _dates_close(str(left.get("start_at") or ""), str(right.get("start_at") or ""), days=21)
+        return _dates_close(str(left.get("start_at") or ""), str(right.get("start_at") or ""), days=0)
     return False
 
 

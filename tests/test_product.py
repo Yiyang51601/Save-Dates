@@ -68,6 +68,11 @@ def test_home_and_static():
         assert "data-field=notes" in js.text
         assert "地点" in js.text
         assert "备注" in js.text
+        assert "加入日历时同时写入 Obsidian" in js.text
+        assert "Also write to Obsidian when adding to the calendar" in js.text
+        assert "obsidianVault" in home.text
+        assert "obsidianWrite" in home.text
+        assert "整理 Inbox 照片" in js.text
         assert "location: \"Location\"" in js.text
         assert "notes: \"Notes\"" in js.text
         assert "currentMailbox = \"\"" in js.text
@@ -792,6 +797,29 @@ def test_search_ranks_latest_received_first():
     assert merged[0]["email_id"] == "new"
 
 
+def test_outlook_com_utc_start_converts_to_local():
+    from datetime import datetime, timezone
+
+    from save_dates.outlook_client import _from_outlook_dt
+
+    class ComDate:
+        year = 2026
+        month = 8
+        day = 18
+        hour = 18
+        minute = 0
+        second = 0
+        tzinfo = timezone.utc
+
+    parsed = _from_outlook_dt(ComDate())
+    utc = parsed.astimezone(timezone.utc)
+    assert utc.year == 2026
+    assert utc.month == 8
+    assert utc.day == 18
+    assert utc.hour == 18
+    assert parsed.tzinfo is not None
+
+
 def test_classic_calendar_sets_location_and_keeps_body():
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -826,6 +854,38 @@ def test_classic_calendar_sets_location_and_keeps_body():
     assert "Public Health Building" in app.item.Location
     assert "入口" in app.item.Body
     assert "要带" in app.item.Body
+    assert app.item.Start.hour == 9
+    assert app.item.End.hour == 10
+
+    class Eastern:
+        ID = "Eastern Standard Time"
+
+    class OutlookTimeZones:
+        def Item(self, name):
+            assert name == "Eastern Standard Time"
+            return Eastern()
+
+    class TzApp:
+        TimeZones = OutlookTimeZones()
+
+        def CreateItem(self, kind):
+            self.item = Appt()
+            return self.item
+
+    tz_app = TzApp()
+    create_calendar_event_with_app(
+        tz_app,
+        "Welcome",
+        datetime(2026, 8, 18, 14, 0, tzinfo=ZoneInfo("America/New_York")),
+        datetime(2026, 8, 18, 15, 15, tzinfo=ZoneInfo("America/New_York")),
+        False,
+        body="source",
+        location="Alumni Hall",
+    )
+    assert tz_app.item.StartTimeZone.ID == "Eastern Standard Time"
+    assert tz_app.item.EndTimeZone.ID == "Eastern Standard Time"
+    assert tz_app.item.StartInStartTimeZone.hour == 14
+    assert tz_app.item.EndInEndTimeZone.hour == 15
 
     empty = App()
     create_calendar_event_with_app(

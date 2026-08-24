@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Save Dates</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260817f" />
+  <link rel="stylesheet" href="/static/styles.css?v=20260823a" />
 </head>
 <body>
   <div class="page">
@@ -53,6 +53,23 @@
         <input id="includeProcessed" type="checkbox" />
         <span data-i18n="includeProcessed"></span>
       </label>
+      <div class="obsidian-box" id="obsidianBox">
+        <p class="settings-hint" data-i18n="obsidianHint"></p>
+        <label class="check">
+          <input id="obsidianWrite" type="checkbox" />
+          <span data-i18n="obsidianWrite"></span>
+        </label>
+        <label class="obsidian-path">
+          <span data-i18n="obsidianVault"></span>
+          <input id="obsidianVault" spellcheck="false" />
+        </label>
+        <p class="settings-hint" id="obsidianStatus"></p>
+        <div class="tool-row">
+          <button class="primary small" id="saveObsidian" type="button" data-i18n="saveObsidian"></button>
+          <button class="ghost small" id="openVaultBtn" type="button" data-i18n="openVault"></button>
+          <button class="ghost small" id="inboxPhotosBtn" type="button" data-i18n="inboxPhotos"></button>
+        </div>
+      </div>
       <details class="advanced-box" id="advancedBox">
         <summary data-i18n="advancedNewOutlook">进阶 · 仅新 Outlook</summary>
         <p class="advanced-help" data-i18n="advancedHelp"></p>
@@ -149,6 +166,6 @@
       <button type="button" class="ghost small" id="connectPickerLater" data-i18n="connectPickerLater"></button>
     </div>
   </div>
-  <script src="/static/app.js?v=20260817f"></script>
+  <script src="/static/app.js?v=20260823a"></script>
 </body>
 </html>

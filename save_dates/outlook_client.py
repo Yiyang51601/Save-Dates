@@ -18,6 +18,7 @@ from save_dates.config import (
 from save_dates.display_title import attach_display_titles
 from save_dates.extract import (
     ExtractedEvent,
+    calendar_tz,
     combine_extracted_events,
     extract_all,
     extract_location_notes,
@@ -62,14 +63,87 @@ _INBOX_NAMES = {
     "bandeja de entrada",
     "posteingang",
 }
-_SKIP_STORE_NAMES = ("public folders", "internet calendar", "rss", "sharepoint")
+_SKIP_STORE_NAMES = (
+    "public folders",
+    "internet calendar",
+    "rss",
+    "sharepoint",
+    "公用文件夹",
+    "互联网日历",
+    "联机存档",
+    "online archive",
+)
 
 
-def _to_naive_local(value: datetime) -> datetime:
-    tz = local_tz()
+WINDOWS_CALENDAR_TZ = "Eastern Standard Time"
+
+
+def _calendar_wall_clock(value: datetime) -> datetime:
+    """Naive clock time in America/New_York for Outlook/Graph writes."""
+    tz = calendar_tz()
     if value.tzinfo is None:
-        return value
-    return value.astimezone(tz).replace(tzinfo=None)
+        local = value
+    else:
+        local = value.astimezone(tz).replace(tzinfo=None)
+    return local.replace(microsecond=0)
+
+
+def _outlook_time_zone(app: Any, windows_id: str = WINDOWS_CALENDAR_TZ) -> Any:
+    tzs = getattr(app, "TimeZones", None)
+    if tzs is None:
+        return None
+    try:
+        return tzs.Item(windows_id)
+    except Exception:
+        pass
+    try:
+        for index in range(1, int(tzs.Count) + 1):
+            item = tzs.Item(index)
+            if str(getattr(item, "ID", "") or "") == windows_id:
+                return item
+    except Exception:
+        return None
+    return None
+
+
+def _outlook_local_text(value: datetime) -> str:
+    """US-locale clock string. pywin32 datetime assigns shift Eastern by the UTC offset."""
+    wall = _calendar_wall_clock(value)
+    return wall.strftime("%#m/%#d/%Y %#I:%M:%S %p")
+
+
+def _set_appt_dt(appt: Any, attr: str, wall: datetime) -> None:
+    if hasattr(appt, "_oleobj_"):
+        setattr(appt, attr, _outlook_local_text(wall))
+    else:
+        setattr(appt, attr, wall)
+
+
+def _apply_start_end(app: Any, appt: Any, start: datetime, end: datetime, all_day: bool) -> None:
+    """Set Start/End as Eastern wall-clock. COM uses Windows TZ unless StartTimeZone is set."""
+    wall_start = _calendar_wall_clock(start)
+    wall_end = _calendar_wall_clock(end)
+    tz_obj = _outlook_time_zone(app)
+    if tz_obj is not None:
+        try:
+            appt.StartTimeZone = tz_obj
+            appt.EndTimeZone = tz_obj
+        except Exception:
+            tz_obj = None
+    if tz_obj is not None:
+        try:
+            _set_appt_dt(appt, "StartInStartTimeZone", wall_start)
+            _set_appt_dt(appt, "EndInEndTimeZone", wall_end)
+        except Exception:
+            _set_appt_dt(appt, "Start", wall_start)
+            _set_appt_dt(appt, "End", wall_end)
+        if hasattr(appt, "_oleobj_"):
+            _set_appt_dt(appt, "Start", wall_start)
+            _set_appt_dt(appt, "End", wall_end)
+    else:
+        _set_appt_dt(appt, "Start", wall_start)
+        _set_appt_dt(appt, "End", wall_end)
+    appt.AllDayEvent = bool(all_day)
 
 
 def _from_outlook_dt(value: Any) -> datetime:
@@ -78,10 +152,13 @@ def _from_outlook_dt(value: Any) -> datetime:
         int(value.year),
         int(value.month),
         int(value.day),
-        int(getattr(value, "hour", 0)),
-        int(getattr(value, "minute", 0)),
-        int(getattr(value, "second", 0)),
+        int(getattr(value, "hour", 0) or 0),
+        int(getattr(value, "minute", 0) or 0),
+        int(getattr(value, "second", 0) or 0),
     )
+    src_tz = getattr(value, "tzinfo", None)
+    if src_tz is not None:
+        return naive.replace(tzinfo=src_tz).astimezone(tz)
     return naive.replace(tzinfo=tz)
 
 
@@ -373,6 +450,7 @@ def mail_to_candidates(item: Any, now: datetime | None = None) -> tuple[str, lis
                 "fuzzy": event.fuzzy,
                 "kind": event.kind,
                 "task_type": event.task_type,
+                "date_kind": event.date_kind,
                 "location": event.location or outlook_loc[:LOCATION_WRITE_MAX],
                 "notes": event.notes or "",
             }
@@ -791,9 +869,8 @@ def create_calendar_event_with_app(
 ) -> str:
     appt = app.CreateItem(OL_APPOINTMENT)
     appt.Subject = title[:255]
-    appt.Start = _to_naive_local(start)
-    appt.End = _to_naive_local(end)
-    appt.AllDayEvent = bool(all_day)
+    # If Windows is still China, COM writes China-local unless StartTimeZone is set.
+    _apply_start_end(app, appt, start, end, all_day)
     loc = (location or "").strip()
     if loc:
         try:

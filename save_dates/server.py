@@ -6,6 +6,7 @@ import threading
 import webbrowser
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -36,6 +37,13 @@ from save_dates.config import (
 )
 from save_dates.display_title import calendar_write_title
 from save_dates.extract import ensure_aware, local_tz
+from save_dates.obsidian import (
+    default_vault_path,
+    ensure_vault,
+    open_vault_folder,
+    process_inbox_photos,
+    write_from_settings,
+)
 from save_dates.greet import given_name, greeting_phrase
 from save_dates.i18n import system_ui_lang
 from save_dates.translator import set_translated_callback
@@ -121,6 +129,10 @@ class SettingsPatch(BaseModel):
     backend: str | None = None
     persist_backend: bool | None = None
     graph_client_id: str | None = None
+    obsidian_vault_path: str | None = None
+    obsidian_export_on_join: bool | None = None
+    obsidian_vault: str | None = Field(default=None, max_length=500)
+    obsidian_write: bool | None = None
 
 
 class BatchRequest(BaseModel):
@@ -162,9 +174,21 @@ def _parse_iso(value: str) -> datetime:
     return ensure_aware(dt, local_tz())
 
 
+def _vault_from_settings(settings: dict | None = None) -> Path:
+    settings = settings if settings is not None else db.get_settings()
+    return Path(
+        str(settings.get("obsidian_vault") or settings.get("obsidian_vault_path") or default_vault_path())
+    )
+
+
 def _public_settings() -> dict:
     settings = dict(db.get_settings())
     settings["has_bundled_graph_client"] = bool(DEFAULT_GRAPH_CLIENT_ID.strip())
+    vault = _vault_from_settings(settings)
+    try:
+        settings["obsidian_vault_exists"] = vault.is_dir()
+    except OSError:
+        settings["obsidian_vault_exists"] = False
     return settings
 
 
@@ -657,7 +681,9 @@ def _accept_one(candidate_id: int) -> dict:
         except Exception:
             entry_id = ""
         updated = db.set_status(candidate_id, "accepted", entry_id)
-        return updated or item
+        row = updated or item
+        write_from_settings(row)
+        return row
     start = _parse_iso(item["start_at"])
     end = _parse_iso(item["end_at"])
     if end <= start:
@@ -674,7 +700,9 @@ def _accept_one(candidate_id: int) -> dict:
     except Exception as exc:
         raise HTTPException(status_code=500, detail="calendar_write_failed") from exc
     updated = db.set_status(candidate_id, "accepted", entry_id)
-    return updated or item
+    row = updated or item
+    write_from_settings(row)
+    return row
 
 
 @app.post("/api/candidates/{candidate_id}/accept")
@@ -758,6 +786,22 @@ def api_desktop_show() -> dict:
     raise HTTPException(status_code=404, detail="no_desktop_window")
 
 
+@app.post("/api/obsidian/inbox-photos")
+def api_obsidian_inbox_photos() -> dict:
+    vault = _vault_from_settings()
+    ensure_vault(vault)
+    return process_inbox_photos(vault)
+
+
+@app.post("/api/obsidian/open-vault")
+def api_obsidian_open_vault() -> dict:
+    vault = _vault_from_settings()
+    ensure_vault(vault)
+    if not open_vault_folder(vault):
+        raise HTTPException(status_code=500, detail="obsidian_open_failed")
+    return {"ok": True, "vault": str(vault)}
+
+
 @app.put("/api/settings")
 def api_put_settings(patch: SettingsPatch) -> dict:
     data = patch.model_dump(exclude_none=True)
@@ -770,8 +814,19 @@ def api_put_settings(patch: SettingsPatch) -> dict:
             db.save_settings(data)
     else:
         db.save_settings(data)
+    try:
+        settings = db.get_settings()
+        if settings.get("obsidian_write") and (
+            "obsidian_write" in data
+            or "obsidian_export_on_join" in data
+            or "obsidian_vault" in data
+            or "obsidian_vault_path" in data
+        ):
+            ensure_vault(_vault_from_settings(settings))
+    except Exception:
+        pass
     watcher.notify(0)
-    return db.get_settings()
+    return _public_settings()
 
 
 @app.post("/api/microsoft/login")

@@ -5,6 +5,7 @@ from PyInstaller.utils.hooks import collect_all
 datas = [
     ("save_dates/static", "save_dates/static"),
     ("assets/icon.ico", "assets"),
+    ("vault_seed", "vault_seed"),
 ]
 binaries = []
 hiddenimports = [
@@ -58,6 +59,7 @@ hiddenimports = [
     "save_dates.display_title",
     "save_dates.translator",
     "save_dates.priority",
+    "save_dates.obsidian",
     "msal",
 ]
 

@@ -140,6 +140,29 @@ def test_unscheduled_meet_is_task():
     assert any(item.task_type == "meet" for item in items)
 
 
+def test_reply_subject_keeps_real_title():
+    event = _first(
+        "Re: Schedule and Reading Update",
+        "Let's meet on Zoom Monday, August 31, 9:30-10 AM.",
+    )
+    assert event.title == "Schedule and Reading Update"
+    assert event.start.month == 8
+    assert event.start.day == 31
+    assert event.start.hour == 9
+    assert event.start.minute == 30
+
+
+def test_email_address_is_not_location():
+    from save_dates.extract import extract_location_notes
+
+    location, notes = extract_location_notes(
+        "Financial Aid",
+        "Please pay by September 16, 2026.\nQuestions: yic327@pitt.edu\nVenue: Public Health Building A511",
+    )
+    assert "@" not in (location or "")
+    assert "A511" in location or "Public Health" in location
+
+
 def test_waiting_for_reply_is_followup_task():
     items = extract_all("时间确认", "等你回复方便的时间。", RECEIVED, now=NOW, tz=TZ)
     assert items
@@ -543,3 +566,26 @@ def test_merge_related_reminder_reuses_location_and_subject_date():
     assert "Public Health Building" in reminder["location"]
     assert "Fifth Avenue" in reminder["notes"]
     assert reminder["start_at"].startswith("2026-08-20")
+
+
+def test_different_orientation_days_do_not_merge():
+    from save_dates.extract import merge_related_events, same_event_family
+
+    uni = {
+        "kind": "event",
+        "title": "University-wide Graduate Orientation",
+        "subject": "University-wide Graduate and Professional Student Orientation 2026",
+        "sender": "Mike Dolinger",
+        "start_at": "2026-08-18T14:00-04:00",
+    }
+    epi = {
+        "kind": "event",
+        "title": "Epidemiology New Student Orientation",
+        "subject": "Pitt Public Health Department of Epidemiology New Student Orientation - August 20, 2026",
+        "sender": "Mike Dolinger",
+        "start_at": "2026-08-20T00:00-04:00",
+        "location": "Public Health Building A521/A522",
+    }
+    assert same_event_family(uni, epi) is False
+    merge_related_events([uni, epi])
+    assert not uni.get("location")

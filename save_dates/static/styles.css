@@ -455,6 +455,32 @@ label input[type="number"] {
   font: inherit;
 }
 .check { display: flex; gap: 8px; align-items: center; }
+.obsidian-box {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  padding-top: 4px;
+  border-top: 1px dashed var(--line);
+}
+.obsidian-path {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.obsidian-path input {
+  flex: 1;
+  min-width: 220px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font: inherit;
+  background: white;
+}
+#obsidianStatus { width: 100%; }
 
 button {
   border: 0;
