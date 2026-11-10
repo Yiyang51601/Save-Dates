@@ -15,6 +15,7 @@ from save_dates.config import (
 from save_dates.graph_auth import acquire_token, cached_account_label, has_cached_account, logout
 from save_dates.graph_client import (
     create_calendar_event,
+    create_reminder_event,
     create_todo_task,
     delete_calendar_event,
     delete_todo_task,
@@ -136,6 +137,11 @@ class GraphRuntime:
         with self._lock:
             token = acquire_token(False)
             return create_calendar_event(token, **kwargs)
+
+    def create_reminder(self, **kwargs: Any) -> str:
+        with self._lock:
+            token = acquire_token(False)
+            return create_reminder_event(token, **kwargs)
 
     def create_task(self, **kwargs: Any) -> str:
         with self._lock:

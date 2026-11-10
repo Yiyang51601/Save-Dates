@@ -18,6 +18,7 @@ from save_dates.config import (
     LOCATION_WRITE_MAX,
     REMINDER_MINUTES_ALL_DAY,
     REMINDER_MINUTES_TIMED,
+    REPEAT_APPOINTMENT_MINUTES,
     clamp_scan_days,
     clamp_scan_emails,
 )
@@ -307,6 +308,44 @@ def create_calendar_event(
     loc = (location or "").strip()
     if loc:
         payload["location"] = {"displayName": loc[:LOCATION_WRITE_MAX]}
+    data = graph_request("POST", f"{GRAPH_ROOT}/me/events", token, json=payload)
+    return str(data.get("id") or "")
+
+
+def reminder_event_payload(
+    title: str,
+    when: datetime,
+    body: str,
+    location: str = "",
+) -> dict[str, Any]:
+    """Graph body for one free appointment that reminds at `when`."""
+    tz_name = str(calendar_tz())
+    end = when + timedelta(minutes=REPEAT_APPOINTMENT_MINUTES)
+    payload: dict[str, Any] = {
+        "subject": title[:255],
+        "body": {"contentType": "text", "content": (body or "")[:BODY_CHAR_LIMIT]},
+        "start": {"dateTime": _wall_time(when), "timeZone": tz_name},
+        "end": {"dateTime": _wall_time(end), "timeZone": tz_name},
+        "isAllDay": False,
+        "showAs": "free",
+        "categories": [CATEGORY_NAME],
+        "isReminderOn": True,
+        "reminderMinutesBeforeStart": 0,
+    }
+    loc = (location or "").strip()
+    if loc:
+        payload["location"] = {"displayName": loc[:LOCATION_WRITE_MAX]}
+    return payload
+
+
+def create_reminder_event(
+    token: str,
+    title: str,
+    when: datetime,
+    body: str,
+    location: str = "",
+) -> str:
+    payload = reminder_event_payload(title, when, body, location)
     data = graph_request("POST", f"{GRAPH_ROOT}/me/events", token, json=payload)
     return str(data.get("id") or "")
 

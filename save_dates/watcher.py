@@ -21,6 +21,7 @@ from save_dates.outlook_client import (
     _get_item,
     _iter_inboxes,
     create_calendar_event_with_app,
+    create_reminder_appointment_with_app,
     create_task_with_app,
     delete_item_with_namespace,
     display_mail,
@@ -193,6 +194,14 @@ class OutlookRuntime:
             if self._app is None:
                 raise RuntimeError("outlook_not_connected")
             return create_calendar_event_with_app(self._app, **kwargs)
+
+        return self.submit(_job)
+
+    def create_reminder(self, **kwargs: Any) -> str:
+        def _job() -> str:
+            if self._app is None:
+                raise RuntimeError("outlook_not_connected")
+            return create_reminder_appointment_with_app(self._app, **kwargs)
 
         return self.submit(_job)
 
@@ -510,6 +519,14 @@ class MailboxHub:
         if snap.backend == "graph":
             return self.graph.create_event(**kwargs)
         return self.classic.create_event(**kwargs)
+
+    def create_reminder(self, **kwargs: Any) -> str:
+        snap = self.snapshot()
+        if not snap.connected:
+            raise RuntimeError(snap.error or "outlook_not_connected")
+        if snap.backend == "graph":
+            return self.graph.create_reminder(**kwargs)
+        return self.classic.create_reminder(**kwargs)
 
     def create_task(self, **kwargs: Any) -> str:
         snap = self.snapshot()

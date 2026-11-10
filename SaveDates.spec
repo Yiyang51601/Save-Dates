@@ -60,6 +60,7 @@ hiddenimports = [
     "save_dates.translator",
     "save_dates.priority",
     "save_dates.obsidian",
+    "save_dates.windows_startup",
     "msal",
 ]
 

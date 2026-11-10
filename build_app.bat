@@ -30,6 +30,6 @@ if errorlevel 1 (
 echo.
 echo 完成。可双击运行：
 echo   dist\SaveDates\SaveDates.exe
-echo 关闭窗口后仍会在托盘里监听新邮件，右键托盘图标可退出。
+echo 关掉窗口就会退出。开机启动默认关闭，可在设置或托盘菜单里勾选「开机时启动」。
 echo.
 pause

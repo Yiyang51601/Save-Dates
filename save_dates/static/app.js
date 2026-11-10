@@ -5,6 +5,18 @@ const STRINGS = {
     eyebrow: "Outlook → 确认 → 日历",
     lede: "有日期的进日历，没写时间的进待办，广告进广告页。点 ✓ 才会写入或清掉。",
     settings: "设置",
+    startWithWindows: "开机时启动",
+    startWithWindowsHint: "默认关闭。取消勾选会删掉开机启动项，之后打开也不会再加回去。关掉窗口就会退出。",
+    startWithWindowsOn: "已开启开机启动。可以在这里或托盘菜单关掉。",
+    startWithWindowsOff: "已关闭开机启动，并删掉启动项。",
+    repeatReminders: "反复提醒",
+    repeatScheduleTimed: "提前 1 天、提前 1 小时、提前 15 分钟。已经过去的不响。日历上原来的一次提醒仍会响。",
+    repeatScheduleAllDay: "前一天上午 9:00（美东），以及当天上午 8:00（美东）。已经过去的不响。日历上原来的一次提醒仍会响。",
+    repeatRemindersSetting: "反复提醒默认关闭，不会对已有日程自动打开。在日程卡片上勾选后才会多次提醒；关掉后，下次打开、扫描或合并邮件也不会再打开。",
+    repeatPanelTitle: "已开启反复提醒",
+    repeatTurnOff: "关闭反复提醒",
+    repeatOff: "已关闭反复提醒，之后不会再响。",
+    addedCalendarRepeat: "已加入日历，并按你勾选的时间额外提醒。",
     language: "语言",
     backend: "连接",
     backendAuto: "自动（优先经典 Outlook）",
@@ -165,6 +177,18 @@ const STRINGS = {
     eyebrow: "Outlook → review → calendar",
     lede: "Dated items go to the calendar, open loops to tasks, ads to Junk after you confirm.",
     settings: "Settings",
+    startWithWindows: "Start with Windows",
+    startWithWindowsHint: "Off by default. Unchecking removes the startup entry, and opening the app will not add it back. Closing the window quits.",
+    startWithWindowsOn: "Save Dates will start with Windows. Turn this off here or from the tray menu.",
+    startWithWindowsOff: "Startup is off, and the startup entry was removed.",
+    repeatReminders: "Repeat reminders",
+    repeatScheduleTimed: "1 day before, 1 hour before, and 15 minutes before. Times already past are skipped. The usual single reminder still fires.",
+    repeatScheduleAllDay: "9:00 the day before, and 8:00 the morning of the event (Eastern). Times already past are skipped. The usual single reminder still fires.",
+    repeatRemindersSetting: "Repeat reminders stay off until you check them on an event card. Scanning, merging mail, or opening the app will not turn them on.",
+    repeatPanelTitle: "Repeat reminders on",
+    repeatTurnOff: "Turn off repeats",
+    repeatOff: "Repeat reminders are off. No further repeats will fire.",
+    addedCalendarRepeat: "Added to the calendar, with the extra reminders you checked.",
     language: "Language",
     backend: "Connect",
     backendAuto: "Auto (Classic Outlook first)",
@@ -336,6 +360,7 @@ function detectSystemLang() {
 
 let lang = detectSystemLang();
 let lastItems = [];
+let lastRepeats = [];
 let lastStatus = null;
 let currentLane = "event";
 let currentMailbox = "";
@@ -382,6 +407,7 @@ function applyI18n() {
   updateLaneButtons(lastItems);
   if (lastStatus) applyStatus(lastStatus);
   render(lastItems);
+  renderRepeatPanel(lastRepeats);
   if (lastSearchQuery) renderSearch(lastSearchItems, lastSearchQuery, lastSearchMeta);
 }
 
@@ -566,6 +592,7 @@ function applyStatus(s) {
     $("graphClientId").value = s.settings.graph_client_id;
   }
   fillObsidianSettings(s);
+  fillStartupSetting(s);
   $("msLoginBtn").classList.toggle("hidden", Boolean(s.graph_logged_in));
   $("msLogoutBtn").classList.toggle("hidden", !s.graph_logged_in);
   if (Array.isArray(s.mailboxes)) {
@@ -924,6 +951,34 @@ function updateEmptyHint(hasItems) {
   }, EMPTY_HINT_MS);
 }
 
+function repeatScheduleText(allDay) {
+  return allDay ? t("repeatScheduleAllDay") : t("repeatScheduleTimed");
+}
+
+function renderRepeatPanel(items) {
+  lastRepeats = items || [];
+  const panel = $("repeatPanel");
+  const host = $("repeatList");
+  const title = $("repeatPanelTitle");
+  if (!panel || !host) return;
+  if (!lastRepeats.length) {
+    panel.classList.add("hidden");
+    host.innerHTML = "";
+    return;
+  }
+  panel.classList.remove("hidden");
+  if (title) title.textContent = t("repeatPanelTitle");
+  host.innerHTML = lastRepeats.map((item) => `
+    <div class="repeat-row">
+      <div>
+        <strong>${escapeHtml(cardTitle(item))}</strong>
+        <span class="repeat-schedule">${escapeHtml(repeatScheduleText(item.all_day))}</span>
+      </div>
+      <button class="ghost small" type="button" data-repeat-off="${item.id}">${escapeHtml(t("repeatTurnOff"))}</button>
+    </div>
+  `).join("");
+}
+
 function render(items) {
   lastItems = items;
   updateLaneButtons(items);
@@ -969,6 +1024,13 @@ function render(items) {
           <input data-field="location" value="${escapeHtml(item.location || "")}" /></label>`;
     const notesField = `<label class="field-block field-notes"><span class="field-label">${escapeHtml(t("notes"))}</span>
           <textarea data-field="notes" rows="2">${escapeHtml(item.notes || "")}</textarea></label>`;
+    const repeatField = `<label class="check repeat-check">
+          <input data-field="repeat_reminders" type="checkbox" ${item.repeat_reminders ? "checked" : ""} />
+          <span>
+            <span>${escapeHtml(t("repeatReminders"))}</span>
+            <span class="repeat-schedule" data-repeat-schedule>${escapeHtml(item.all_day ? t("repeatScheduleAllDay") : t("repeatScheduleTimed"))}</span>
+          </span>
+        </label>`;
     const fields = promo
       ? `<div class="fields">
           <input class="title" data-field="title" value="${escapeHtml(titleText)}" />
@@ -984,6 +1046,7 @@ function render(items) {
           <label class="check"><input data-field="all_day" type="checkbox" ${item.all_day ? "checked" : ""} /> ${t("allDay")}</label>
           ${locationField}
           ${notesField}
+          ${repeatField}
         </div>`;
     const mailbox = item.mailbox ? `<span class="mailbox-tag">${escapeHtml(item.mailbox)}</span> ` : "";
     card.innerHTML = `
@@ -1178,6 +1241,7 @@ async function loadList() {
   if (!demoActive && items.some(isDemoItem)) demoActive = true;
   updateDemoButton();
   render(items);
+  renderRepeatPanel(data.repeats || []);
   setCounts(data.counts);
 }
 
@@ -1203,6 +1267,8 @@ async function saveEdits(card) {
   const when = card.querySelector("[data-field=when]").value;
   payload.all_day = allDay;
   payload.start_at = allDay ? `${when}T00:00` : when;
+  const repeatEl = card.querySelector("[data-field=repeat_reminders]");
+  if (repeatEl) payload.repeat_reminders = Boolean(repeatEl.checked);
   await api(`/api/candidates/${id}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
@@ -1345,10 +1411,15 @@ $("list").addEventListener("change", async (event) => {
     const allDay = event.target.checked;
     input.type = allDay ? "date" : "datetime-local";
     input.value = allDay ? toDateInput(start) : toLocalInput(Number.isNaN(start.getTime()) ? new Date() : start);
+    const schedule = card.querySelector("[data-repeat-schedule]");
+    if (schedule) schedule.textContent = repeatScheduleText(allDay);
   }
   try {
     await saveEdits(card);
   } catch (err) {
+    if (event.target.dataset.field === "repeat_reminders" && event.target.type === "checkbox") {
+      event.target.checked = !event.target.checked;
+    }
     setBanner(err.message, true);
   }
 });
@@ -1374,9 +1445,28 @@ $("list").addEventListener("click", async (event) => {
     } else if (card.dataset.kind === "promo") {
       setBanner(data.item?.calendar_entry_id ? t("addedPromo") : t("addedPromoLocal"), false, [id]);
     } else {
-      setBanner(t("addedCalendar"), false, [id]);
+      setBanner(data.item?.repeat_reminders ? t("addedCalendarRepeat") : t("addedCalendar"), false, [id]);
     }
   } catch (err) {
+    setBanner(err.message, true);
+  }
+});
+
+$("repeatList").addEventListener("click", async (event) => {
+  const btn = event.target.closest("[data-repeat-off]");
+  if (!btn) return;
+  const id = Number(btn.dataset.repeatOff);
+  btn.disabled = true;
+  try {
+    await api(`/api/candidates/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ repeat_reminders: false }),
+    });
+    setBanner(t("repeatOff"));
+    await loadList();
+    await refreshStatus();
+  } catch (err) {
+    btn.disabled = false;
     setBanner(err.message, true);
   }
 });
@@ -1527,6 +1617,12 @@ $("saveClientId").addEventListener("click", async () => {
   }
 });
 
+function fillStartupSetting(s) {
+  const box = $("startWithWindows");
+  if (!box || document.activeElement === box) return;
+  box.checked = s?.settings?.start_with_windows === true;
+}
+
 function fillObsidianSettings(s) {
   const vault = $("obsidianVault");
   const write = $("obsidianWrite");
@@ -1559,6 +1655,22 @@ async function saveObsidianSettings() {
   setBanner(t("obsidianSaved"));
   await refreshStatus();
 }
+
+$("startWithWindows")?.addEventListener("change", async () => {
+  const box = $("startWithWindows");
+  const want = Boolean(box?.checked);
+  try {
+    const saved = await api("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({ start_with_windows: want }),
+    });
+    if (box) box.checked = saved.start_with_windows === true;
+    setBanner(t(box?.checked ? "startWithWindowsOn" : "startWithWindowsOff"));
+  } catch (err) {
+    if (box) box.checked = !want;
+    setBanner(err.message, true);
+  }
+});
 
 $("obsidianWrite")?.addEventListener("change", () => {
   saveObsidianSettings().catch((err) => setBanner(err.message, true));

@@ -74,11 +74,53 @@ def _start_server() -> None:
         logging.exception("Local server thread crashed")
 
 
+def close_window_quits() -> bool:
+    """Closing the window ends the process. It must not hide into the tray."""
+    return True
+
+
+def _startup_menu_checked(_item) -> bool:
+    try:
+        from save_dates.db import get_settings
+
+        return get_settings().get("start_with_windows") is True
+    except Exception:
+        logging.exception("Could not read Windows startup setting")
+        return False
+
+
+def _toggle_startup(_icon, item) -> None:
+    enabled = not bool(item.checked)
+    try:
+        from save_dates.db import save_settings
+        from save_dates.windows_startup import reconcile_installed_autostart
+
+        save_settings({"start_with_windows": enabled})
+        actual = reconcile_installed_autostart(enabled, rewrite=enabled is True)
+        if actual is not enabled:
+            save_settings({"start_with_windows": actual})
+        logging.info("Windows startup set to %s", "on" if actual else "off")
+    except Exception:
+        logging.exception("Could not change Windows startup")
+
+
+def sync_windows_startup() -> None:
+    from save_dates.db import get_settings, save_settings
+    from save_dates.windows_startup import reconcile_installed_autostart
+
+    wanted = get_settings().get("start_with_windows") is True
+    actual = reconcile_installed_autostart(wanted)
+    if actual is not wanted:
+        save_settings({"start_with_windows": actual})
+    logging.info("Windows startup is %s", "on" if actual else "off")
+
+
 def _load_tray_icon(show_window, quit_app):
     import pystray
 
     menu = pystray.Menu(
         pystray.MenuItem("打开窗口", show_window, default=True),
+        pystray.MenuItem("开机时启动", _toggle_startup, checked=_startup_menu_checked),
         pystray.MenuItem("退出", quit_app),
     )
     icon = pystray.Icon("SaveDates", _icon_image(), "Save Dates", menu)
@@ -102,6 +144,10 @@ def _ask_existing_to_show(url: str) -> bool:
 def main() -> None:
     _ensure_stdio()
     _setup_logging()
+    try:
+        sync_windows_startup()
+    except Exception:
+        logging.exception("Could not sync Windows startup")
     url = f"http://{HOST}:{PORT}"
     own_server = False
 
@@ -166,10 +212,8 @@ def main() -> None:
             pass
 
     def on_closing() -> bool:
-        if quitting["value"] or not own_server or tray is None:
-            return True
-        window.hide()
-        return False
+        quitting["value"] = True
+        return close_window_quits()
 
     if own_server:
         try:
@@ -211,7 +255,11 @@ def main() -> None:
                 threading.Event().wait()
             return
     logging.info("Native window closed")
-    quit_app()
+    try:
+        quit_app()
+    finally:
+        # Tray and server threads must not keep the process alive after quit.
+        os._exit(0)
 
 
 if __name__ == "__main__":

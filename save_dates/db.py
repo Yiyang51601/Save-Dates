@@ -82,6 +82,14 @@ def init_db() -> None:
                 conn.execute("ALTER TABLE candidates ADD COLUMN location TEXT NOT NULL DEFAULT ''")
             if "notes" not in cols:
                 conn.execute("ALTER TABLE candidates ADD COLUMN notes TEXT NOT NULL DEFAULT ''")
+            if "repeat_reminders" not in cols:
+                conn.execute(
+                    "ALTER TABLE candidates ADD COLUMN repeat_reminders INTEGER NOT NULL DEFAULT 0"
+                )
+            if "reminder_entry_ids" not in cols:
+                conn.execute(
+                    "ALTER TABLE candidates ADD COLUMN reminder_entry_ids TEXT NOT NULL DEFAULT ''"
+                )
             conn.execute("DROP INDEX IF EXISTS idx_pending_unique")
             conn.execute(
                 """
@@ -142,6 +150,21 @@ def _relax_unique(conn: sqlite3.Connection) -> None:
     )
 
 
+def _reminder_ids(raw: Any) -> list[str]:
+    if isinstance(raw, list):
+        return [str(part) for part in raw if str(part).strip()]
+    text = str(raw or "").strip()
+    if not text:
+        return []
+    try:
+        data = json.loads(text)
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    return [str(part) for part in data if str(part).strip()]
+
+
 def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     item = dict(row)
     item["all_day"] = bool(item["all_day"])
@@ -151,6 +174,8 @@ def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
     item["mailbox"] = item.get("mailbox") or ""
     item["location"] = item.get("location") or ""
     item["notes"] = item.get("notes") or ""
+    item["repeat_reminders"] = bool(item.get("repeat_reminders"))
+    item["reminder_entry_ids"] = _reminder_ids(item.get("reminder_entry_ids"))
     email_id = str(item.get("email_id") or "")
     mail_url = str(item.get("mail_url") or "")
     item["can_open_mail"] = (bool(email_id) and not email_id.startswith("demo-")) or bool(mail_url)
@@ -203,9 +228,15 @@ def find_candidate_match(
             conn.close()
 
 
+def _demo_email(item: dict[str, Any]) -> bool:
+    return str(item.get("email_id") or "").startswith("demo-")
+
+
 def list_candidates(status: str | None = "pending", limit: int = 80) -> list[dict[str, Any]]:
     limit = max(1, min(int(limit), 200))
-    fetch_limit = 400 if status == "pending" else limit
+    # The old window kept only the earliest start times. Once a few hundred
+    # old cards were pending, later events and sample mail never appeared.
+    fetch_limit = 5000 if status == "pending" else limit
     with _lock:
         conn = _connect()
         try:
@@ -214,13 +245,26 @@ def list_candidates(status: str | None = "pending", limit: int = 80) -> list[dic
                     """
                     SELECT * FROM candidates
                     WHERE status = ?
-                    ORDER BY start_at ASC, id ASC
+                    ORDER BY id DESC
                     LIMIT ?
                     """,
                     (status, fetch_limit),
                 ).fetchall()
-                items = [_row_to_dict(r) for r in rows]
-                return sort_pending(items)[:limit]
+                ranked = []
+                for row in rows:
+                    item = _row_to_dict(row)
+                    if _demo_email(item):
+                        # Sample mail has to stay on the page with real cards,
+                        # and review actions in 示例 should hit the samples.
+                        item["priority"] = round(float(item.get("priority") or 0) + 10000, 1)
+                    ranked.append(item)
+                ranked = sort_pending(ranked)
+                demos = [row for row in ranked if _demo_email(row)]
+                real = [row for row in ranked if not _demo_email(row)]
+                if demos:
+                    room = max(limit - len(demos), 0)
+                    return sort_pending(real[:room] + demos)
+                return ranked[:limit]
             if status:
                 rows = conn.execute(
                     """
@@ -272,8 +316,57 @@ def insert_candidates(items: list[dict[str, Any]]) -> int:
     return inserted
 
 
+def _pending_repeat_opt_ins(conn: sqlite3.Connection, email_ids: set[str]) -> list[tuple[str, str, str, str, str]]:
+    kept: list[tuple[str, str, str, str, str]] = []
+    for email_id in email_ids:
+        rows = conn.execute(
+            """
+            SELECT title, start_at, kind, task_type
+            FROM candidates
+            WHERE email_id = ? AND status = 'pending' AND IFNULL(repeat_reminders, 0) = 1
+            """,
+            (email_id,),
+        ).fetchall()
+        for row in rows:
+            kept.append(
+                (
+                    email_id,
+                    str(row["title"] or ""),
+                    str(row["start_at"] or ""),
+                    str(row["kind"] or "event"),
+                    str(row["task_type"] or ""),
+                )
+            )
+    return kept
+
+
+def _restore_repeat_opt_ins(
+    conn: sqlite3.Connection, kept: list[tuple[str, str, str, str, str]]
+) -> None:
+    for email_id, title, start_at, kind, task_type in kept:
+        if kind != "event":
+            continue
+        conn.execute(
+            """
+            UPDATE candidates
+            SET repeat_reminders = 1
+            WHERE status = 'pending'
+              AND email_id = ?
+              AND title = ?
+              AND start_at = ?
+              AND IFNULL(kind, 'event') = ?
+              AND IFNULL(task_type, '') = ?
+            """,
+            (email_id, title, start_at, kind, task_type),
+        )
+
+
 def save_scan_candidates(items: list[dict[str, Any]]) -> int:
-    """Replace pending cards for the same emails, then insert the new extraction."""
+    """Replace pending cards for the same emails, then insert the new extraction.
+
+    An explicit repeat opt-in on the same pending event is kept. A scan never
+    turns repeats on by itself, and an opt-out stays off.
+    """
     if not items:
         return 0
     now = datetime.now().isoformat(timespec="seconds")
@@ -282,12 +375,14 @@ def save_scan_candidates(items: list[dict[str, Any]]) -> int:
     with _lock:
         conn = _connect()
         try:
+            preserved = _pending_repeat_opt_ins(conn, email_ids)
             for email_id in email_ids:
                 conn.execute(
                     "DELETE FROM candidates WHERE email_id = ? AND status = 'pending'",
                     (email_id,),
                 )
             inserted = _insert_rows(conn, items, now)
+            _restore_repeat_opt_ins(conn, preserved)
             conn.commit()
         finally:
             conn.close()
@@ -429,6 +524,64 @@ def clear_pending_prefix(prefix: str) -> int:
             return int(cur.rowcount or 0)
         finally:
             conn.close()
+
+
+def list_repeat_events(limit: int = 40) -> list[dict[str, Any]]:
+    limit = max(1, min(int(limit), 80))
+    with _lock:
+        conn = _connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT * FROM candidates
+                WHERE status = 'accepted'
+                  AND IFNULL(repeat_reminders, 0) = 1
+                  AND IFNULL(kind, 'event') = 'event'
+                ORDER BY start_at ASC, id ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [_row_to_dict(row) for row in rows]
+        finally:
+            conn.close()
+
+
+def set_repeat_reminders(
+    candidate_id: int,
+    enabled: bool,
+    entry_ids: list[str] | None = None,
+) -> dict[str, Any] | None:
+    """Store the user's choice. Disabling always clears the Outlook reminder ids."""
+    flag = 1 if enabled else 0
+    if not enabled or entry_ids is not None:
+        encoded = json.dumps(
+            [] if not enabled else [str(part) for part in (entry_ids or []) if str(part).strip()],
+            ensure_ascii=False,
+        )
+    else:
+        encoded = None
+    with _lock:
+        conn = _connect()
+        try:
+            if encoded is None:
+                conn.execute(
+                    "UPDATE candidates SET repeat_reminders = ? WHERE id = ?",
+                    (flag, candidate_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE candidates
+                    SET repeat_reminders = ?, reminder_entry_ids = ?
+                    WHERE id = ?
+                    """,
+                    (flag, encoded, candidate_id),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+    return get_candidate(candidate_id)
 
 
 def set_status(
@@ -644,6 +797,8 @@ def get_settings() -> dict[str, Any]:
         "obsidian_vault_path": vault,
         "obsidian_write": obsidian_write,
         "obsidian_export_on_join": obsidian_write,
+        "start_with_windows": data.get("start_with_windows") is True,
+        "repeat_reminders": data.get("repeat_reminders") is True,
     }
 
 
@@ -698,5 +853,13 @@ def save_settings(patch: dict[str, Any]) -> dict[str, Any]:
         flag = bool(data["obsidian_write"])
         out["obsidian_export_on_join"] = flag
         out["obsidian_write"] = flag
+    if "start_with_windows" in patch:
+        out["start_with_windows"] = patch["start_with_windows"] is True
+    elif "start_with_windows" in data:
+        out["start_with_windows"] = data.get("start_with_windows") is True
+    if "repeat_reminders" in patch:
+        out["repeat_reminders"] = patch["repeat_reminders"] is True
+    elif "repeat_reminders" in data:
+        out["repeat_reminders"] = data.get("repeat_reminders") is True
     SETTINGS_PATH.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     return get_settings()

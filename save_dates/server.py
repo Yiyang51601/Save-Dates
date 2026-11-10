@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 import webbrowser
 from contextlib import asynccontextmanager
@@ -36,7 +37,8 @@ from save_dates.config import (
     TITLE_FIELD_MAX,
 )
 from save_dates.display_title import calendar_write_title
-from save_dates.extract import ensure_aware, local_tz
+from save_dates.extract import calendar_tz, ensure_aware, local_tz
+from save_dates.reminders import active_repeat_times, normalize_repeat_enabled, reminder_subject
 from save_dates.obsidian import (
     default_vault_path,
     ensure_vault,
@@ -122,6 +124,7 @@ class CandidatePatch(BaseModel):
     all_day: bool | None = None
     location: str | None = Field(default=None, max_length=LOCATION_FIELD_MAX)
     notes: str | None = Field(default=None, max_length=NOTES_FIELD_MAX)
+    repeat_reminders: bool | None = None
 
 
 class SettingsPatch(BaseModel):
@@ -133,6 +136,8 @@ class SettingsPatch(BaseModel):
     obsidian_export_on_join: bool | None = None
     obsidian_vault: str | None = Field(default=None, max_length=500)
     obsidian_write: bool | None = None
+    start_with_windows: bool | None = None
+    repeat_reminders: bool | None = None
 
 
 class BatchRequest(BaseModel):
@@ -179,6 +184,19 @@ def _vault_from_settings(settings: dict | None = None) -> Path:
     return Path(
         str(settings.get("obsidian_vault") or settings.get("obsidian_vault_path") or default_vault_path())
     )
+
+
+def _apply_startup_setting() -> None:
+    from save_dates.windows_startup import reconcile_installed_autostart
+
+    wanted = db.get_settings().get("start_with_windows") is True
+    try:
+        actual = reconcile_installed_autostart(wanted, rewrite=wanted)
+    except Exception:
+        logging.exception("Could not update Windows startup")
+        return
+    if actual is not wanted:
+        db.save_settings({"start_with_windows": actual})
 
 
 def _public_settings() -> dict:
@@ -541,6 +559,7 @@ def api_list(status: str = "pending") -> dict:
         "counts": db.counts(),
         "mailboxes": list(watcher.snapshot().mailboxes or []),
         "unread_mailboxes": list(watcher.snapshot().unread_mailboxes or []),
+        "repeats": db.list_repeat_events(),
     }
 
 
@@ -607,6 +626,8 @@ def api_patch(candidate_id: int, patch: CandidatePatch) -> dict:
     if not current:
         raise HTTPException(status_code=404, detail="candidate_missing")
     fields = patch.model_dump(exclude_none=True)
+    repeat_requested = "repeat_reminders" in fields
+    repeat_value = bool(fields.pop("repeat_reminders", False))
     if "start_at" in fields:
         start = _parse_iso(fields["start_at"])
         fields["start_at"] = start.isoformat(timespec="minutes")
@@ -623,6 +644,8 @@ def api_patch(candidate_id: int, patch: CandidatePatch) -> dict:
         updated = db.update_candidate(candidate_id, fields)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if repeat_requested:
+        updated = _apply_repeat_choice(candidate_id, repeat_value)
     return {"item": updated}
 
 
@@ -656,6 +679,88 @@ def _write_body(item: dict) -> str:
     if notes and notes not in source:
         return f"{notes}\n\n{source}"
     return source
+
+
+def _repeat_note(item: dict, when: datetime) -> str:
+    lang = db.get_settings().get("lang") or "zh"
+    title = str(item.get("title") or item.get("subject") or "")
+    start = str(item.get("start_at") or "")
+    stamp = when.astimezone(calendar_tz()).strftime("%Y-%m-%d %H:%M")
+    if lang == "en":
+        return (
+            f"Save Dates repeat reminder for {title}.\n"
+            f"Event time: {start}\n"
+            f"This reminder: {stamp} Eastern.\n"
+            "Turn repeats off in Save Dates to stop the later ones."
+        )
+    return (
+        f"Save Dates 反复提醒：{title}\n"
+        f"活动时间：{start}\n"
+        f"这次提醒：{stamp}（美东）\n"
+        "在 Save Dates 里关闭反复提醒后，后面的提醒会停。"
+    )
+
+
+def _create_repeat_entries(item: dict) -> list[str]:
+    times = active_repeat_times(item, datetime.now(calendar_tz()))
+    if not times:
+        return []
+    lang = str(db.get_settings().get("lang") or "zh")
+    title = reminder_subject(str(item.get("title") or item.get("subject") or ""), lang)
+    location = str(item.get("location") or "")[:LOCATION_WRITE_MAX]
+    ids: list[str] = []
+    for when in times:
+        try:
+            entry_id = watcher.create_reminder(
+                title=title,
+                when=when,
+                body=_repeat_note(item, when),
+                location=location,
+            )
+        except Exception:
+            logging.exception("Could not create repeat reminder")
+            continue
+        if entry_id:
+            ids.append(str(entry_id))
+    return ids
+
+
+def _delete_repeat_entries(item: dict) -> bool:
+    ok = True
+    for entry_id in item.get("reminder_entry_ids") or []:
+        try:
+            watcher.delete_written(str(entry_id), "event")
+        except Exception as exc:
+            if str(exc) in {"mail_not_found", "candidate_missing"}:
+                continue
+            logging.exception("Could not delete repeat reminder")
+            ok = False
+    return ok
+
+
+def _apply_repeat_choice(candidate_id: int, enabled: bool) -> dict:
+    item = db.get_candidate(candidate_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="candidate_missing")
+    enabled = normalize_repeat_enabled(item, enabled)
+    if not enabled:
+        if item.get("reminder_entry_ids") and not _delete_repeat_entries(item):
+            raise HTTPException(status_code=500, detail="calendar_write_failed")
+        updated = db.set_repeat_reminders(candidate_id, False, [])
+        return updated or item
+    if item.get("status") != "accepted":
+        updated = db.set_repeat_reminders(candidate_id, True, None)
+        return updated or item
+    if item.get("reminder_entry_ids") and not _delete_repeat_entries(item):
+        raise HTTPException(status_code=500, detail="calendar_write_failed")
+    fresh = db.get_candidate(candidate_id) or item
+    fresh = dict(fresh)
+    fresh["repeat_reminders"] = True
+    fresh["status"] = "accepted"
+    fresh["reminder_entry_ids"] = []
+    ids = _create_repeat_entries(fresh)
+    updated = db.set_repeat_reminders(candidate_id, True, ids)
+    return updated or item
 
 
 def _accept_one(candidate_id: int) -> dict:
@@ -702,6 +807,8 @@ def _accept_one(candidate_id: int) -> dict:
     updated = db.set_status(candidate_id, "accepted", entry_id)
     row = updated or item
     write_from_settings(row)
+    if (row.get("kind") or "event") == "event" and row.get("repeat_reminders"):
+        row = _apply_repeat_choice(candidate_id, True)
     return row
 
 
@@ -733,6 +840,11 @@ def _undo_one(candidate_id: int) -> dict:
             else:
                 watcher.delete_written(entry_id, item.get("kind") or "event")
         except Exception:
+            outlook_deleted = False
+    if item.get("reminder_entry_ids"):
+        if _delete_repeat_entries(item):
+            db.set_repeat_reminders(candidate_id, bool(item.get("repeat_reminders")), [])
+        else:
             outlook_deleted = False
     updated = db.restore_pending(candidate_id)
     return {"item": updated or item, "outlook_deleted": outlook_deleted}
@@ -805,6 +917,7 @@ def api_obsidian_open_vault() -> dict:
 @app.put("/api/settings")
 def api_put_settings(patch: SettingsPatch) -> dict:
     data = patch.model_dump(exclude_none=True)
+    startup_requested = "start_with_windows" in data
     persist = data.pop("persist_backend", True)
     backend = data.get("backend")
     if backend in {"auto", "classic", "graph"} and persist is False:
@@ -814,6 +927,8 @@ def api_put_settings(patch: SettingsPatch) -> dict:
             db.save_settings(data)
     else:
         db.save_settings(data)
+    if startup_requested:
+        _apply_startup_setting()
     try:
         settings = db.get_settings()
         if settings.get("obsidian_write") and (

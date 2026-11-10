@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Save Dates</title>
-  <link rel="stylesheet" href="/static/styles.css?v=20260823a" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261109a" />
 </head>
 <body>
   <div class="page">
@@ -29,6 +29,12 @@
     <p class="status-meta" id="statusMeta"></p>
 
     <div class="settings-panel hidden" id="settingsPanel">
+      <label class="check" id="startWithWindowsRow">
+        <input id="startWithWindows" type="checkbox" />
+        <span data-i18n="startWithWindows"></span>
+      </label>
+      <p class="settings-hint" data-i18n="startWithWindowsHint"></p>
+      <p class="settings-hint" id="repeatRemindersSetting" data-i18n="repeatRemindersSetting"></p>
       <p class="settings-hint" data-i18n="classicHint"></p>
       <label class="lang-box">
         <span data-i18n="backend"></span>
@@ -117,6 +123,10 @@
     </div>
     <p class="mailbox-hint hidden" id="mailboxHint"></p>
 
+    <section class="repeat-panel hidden" id="repeatPanel">
+      <h2 id="repeatPanelTitle"></h2>
+      <div id="repeatList"></div>
+    </section>
     <div class="banner hidden" id="banner">
       <span id="bannerText"></span>
       <button class="ghost small hidden" id="undoBtn" type="button" data-i18n="undo"></button>
@@ -166,6 +176,6 @@
       <button type="button" class="ghost small" id="connectPickerLater" data-i18n="connectPickerLater"></button>
     </div>
   </div>
-  <script src="/static/app.js?v=20260823a"></script>
+  <script src="/static/app.js?v=20261109a"></script>
 </body>
 </html>

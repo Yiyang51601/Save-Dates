@@ -12,6 +12,7 @@ from save_dates.config import (
     LOCATION_WRITE_MAX,
     REMINDER_MINUTES_ALL_DAY,
     REMINDER_MINUTES_TIMED,
+    REPEAT_APPOINTMENT_MINUTES,
     clamp_scan_days,
     clamp_scan_emails,
 )
@@ -39,6 +40,7 @@ OL_FOLDER_JUNK = 23
 OL_APPOINTMENT = 1
 OL_TASK = 3
 OL_TENTATIVE = 1
+OL_FREE = 0
 OL_MAIL_ITEM_TYPE = 0
 OL_EXCHANGE_PUBLIC_FOLDER = 1
 PR_INTERNET_MESSAGE_ID = "http://schemas.microsoft.com/mapi/proptag/0x1035001F"
@@ -895,6 +897,45 @@ def create_calendar_event_with_app(
     appt.Save()
     entry_id = str(appt.EntryID)
     return entry_id
+
+
+def create_reminder_appointment_with_app(
+    app: Any,
+    title: str,
+    when: datetime,
+    body: str,
+    location: str = "",
+) -> str:
+    """One free appointment that Outlook reminds at `when`. Several of these repeat."""
+    appt = app.CreateItem(OL_APPOINTMENT)
+    appt.Subject = title[:255]
+    end = when + timedelta(minutes=REPEAT_APPOINTMENT_MINUTES)
+    _apply_start_end(app, appt, when, end, False)
+    loc = (location or "").strip()
+    if loc:
+        try:
+            appt.Location = loc[:LOCATION_WRITE_MAX]
+        except Exception:
+            pass
+    text = (body or "")[:BODY_CHAR_LIMIT]
+    if text:
+        try:
+            appt.Body = text
+        except Exception:
+            try:
+                appt.HTMLBody = text
+            except Exception:
+                pass
+    appt.BusyStatus = OL_FREE
+    appt.Categories = CATEGORY_NAME
+    try:
+        appt.ReminderOverrideDefault = True
+    except Exception:
+        pass
+    appt.ReminderSet = True
+    appt.ReminderMinutesBeforeStart = 0
+    appt.Save()
+    return str(appt.EntryID)
 
 
 def create_task_with_app(app: Any, title: str, body: str) -> str:

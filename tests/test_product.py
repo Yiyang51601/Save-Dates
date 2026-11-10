@@ -52,6 +52,11 @@ def test_home_and_static():
         assert "mailboxPick" in home.text
         assert "mailboxSeg" not in home.text
         assert "退出示例" in js.text
+        assert "startWithWindows" in home.text
+        assert "开机时启动" in js.text
+        assert "Start with Windows" in js.text
+        assert "start_with_windows" in js.text
+        assert "app.js?v=20261109a" in home.text
         assert "Exit sample" in js.text
         assert "demoExitBtn" in js.text
         assert "exit_demo" in js.text
@@ -958,11 +963,38 @@ def test_long_location_and_notes_patch_reaches_calendar(monkeypatch):
         assert "charged phone" in captured["body"]
 
 
-def test_scan_year_range_is_accepted():
+def test_scan_year_range_is_accepted(monkeypatch):
+    seen: dict = {}
+
+    def fake_scan(days, max_emails, include_processed=False):
+        seen["days"] = days
+        seen["max_emails"] = max_emails
+        seen["include_processed"] = include_processed
+        return {
+            "scanned": 0,
+            "skipped_invite": 0,
+            "skipped_processed": 0,
+            "found": 0,
+            "added": 0,
+            "account": "",
+            "mailboxes": [],
+            "unread_mailboxes": [],
+        }
+
+    class Connected:
+        connected = True
+        error = ""
+        mailboxes: list = []
+        unread_mailboxes: list = []
+
+    monkeypatch.setattr("save_dates.server.watcher.scan", fake_scan)
+    monkeypatch.setattr("save_dates.server.watcher.snapshot", lambda: Connected())
     with TestClient(app) as client:
         response = client.post("/api/scan", json={"days": 365, "max_emails": 1000})
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         assert "Input should be less than or equal" not in response.text
+        assert seen["days"] == 365
+        assert seen["max_emails"] == 1000
 
 
 def test_scan_over_limits_returns_clear_code_not_pydantic_dump():
